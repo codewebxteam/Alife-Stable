@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom"; // <--- ADDED for redirection
 import {
   X,
   Mail,
@@ -17,7 +18,7 @@ import {
   Globe,
   Loader2,
   Smartphone,
-  Building2, // Icon for City
+  Building2,
 } from "lucide-react";
 
 // --- Firebase Imports ---
@@ -36,15 +37,15 @@ import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 // ==========================================
 // FIREBASE CONFIGURATION
 // ==========================================
-// ⚠️ IMPORTANT: Yahan apni REAL KEYS dalein ⚠️
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY, 
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
+
 // --- Initialize Firebase ---
 let app;
 let auth;
@@ -58,7 +59,6 @@ try {
   }
   auth = getAuth(app);
   db = getFirestore(app);
-  // Use device language for auth (e.g. SMS templates)
   auth.useDeviceLanguage();
 } catch (e) {
   console.error("Firebase init error:", e);
@@ -105,6 +105,8 @@ const PLANS = [
 ];
 
 const AuthModal = ({ isOpen, onClose }) => {
+  const navigate = useNavigate(); // <--- Hook for navigation
+
   // Views: 'login', 'login-otp', 'signup-step-1', 'signup-step-2', 'otp-verify'
   const [view, setView] = useState("login");
   const [direction, setDirection] = useState(0);
@@ -120,14 +122,14 @@ const AuthModal = ({ isOpen, onClose }) => {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [selectedState, setSelectedState] = useState("");
-  const [city, setCity] = useState(""); // NEW: City State
+  const [city, setCity] = useState("");
   const [pincode, setPincode] = useState("");
 
   const [selectedPlan, setSelectedPlan] = useState("");
   const [promoCode, setPromoCode] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
 
-  // OTP State (Now 6 Digits)
+  // OTP State
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [confirmationResult, setConfirmationResult] = useState(null);
 
@@ -176,7 +178,6 @@ const AuthModal = ({ isOpen, onClose }) => {
 
   // --- Recaptcha Setup ---
   const setupRecaptcha = () => {
-    // Clear previous instance if any
     if (window.recaptchaVerifier) {
       try {
         window.recaptchaVerifier.clear();
@@ -186,8 +187,6 @@ const AuthModal = ({ isOpen, onClose }) => {
       window.recaptchaVerifier = null;
     }
 
-    // Initialize new Recaptcha
-    // 'recaptcha-container' div must be present in DOM
     window.recaptchaVerifier = new RecaptchaVerifier(
       auth,
       "recaptcha-container",
@@ -212,18 +211,12 @@ const AuthModal = ({ isOpen, onClose }) => {
     setDirection(1);
     setView(newView);
     setError("");
-    setOtp(["", "", "", "", "", ""]); // Reset 6 digit OTP
+    setOtp(["", "", "", "", "", ""]);
   };
 
   // --- 1. Login (Phone/Email + Password) ---
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (firebaseConfig.apiKey === "YOUR_API_KEY_HERE") {
-      alert(
-        "Error: Please replace 'YOUR_API_KEY_HERE' in AuthModal.jsx with your real Firebase Key."
-      );
-      return;
-    }
     setLoading(true);
     setError("");
 
@@ -251,7 +244,10 @@ const AuthModal = ({ isOpen, onClose }) => {
       }
 
       await signInWithEmailAndPassword(auth, emailToLogin, loginPassword);
+
+      // SUCCESS: Navigate to Dashboard
       onClose();
+      navigate("/dashboard");
     } catch (err) {
       console.error(err);
       setError(
@@ -267,10 +263,6 @@ const AuthModal = ({ isOpen, onClose }) => {
   // --- 2. Login via OTP (Request) ---
   const handleLoginOtpRequest = async (e) => {
     e.preventDefault();
-    if (firebaseConfig.apiKey === "YOUR_API_KEY_HERE") {
-      alert("Please put your Real API Key in AuthModal.jsx code.");
-      return;
-    }
     setLoading(true);
     setError("");
 
@@ -290,11 +282,9 @@ const AuthModal = ({ isOpen, onClose }) => {
       console.error(err);
       setLoading(false);
       if (err.message.includes("auth/invalid-api-key")) {
-        setError("Invalid API Key in code.");
-      } else if (err.message.includes("auth/unauthorized-domain")) {
-        setError("Domain not authorized in Firebase Console.");
+        setError("Invalid API Key configuration.");
       } else {
-        setError("Failed to send OTP. Check console for details.");
+        setError("Failed to send OTP. Check console.");
       }
     }
   };
@@ -302,7 +292,6 @@ const AuthModal = ({ isOpen, onClose }) => {
   // --- 3. Signup Steps ---
   const handleSignupStep1 = (e) => {
     e.preventDefault();
-    // Added 'city' to validation
     if (!email || !fullName || !phone || !selectedState || !city || !pincode) {
       setError("Please fill all fields");
       return;
@@ -312,10 +301,6 @@ const AuthModal = ({ isOpen, onClose }) => {
 
   const handleSignupFinal = async (e) => {
     e.preventDefault();
-    if (firebaseConfig.apiKey === "YOUR_API_KEY_HERE") {
-      alert("Please put your Real API Key in AuthModal.jsx code.");
-      return;
-    }
     if (!selectedPlan || !signupPassword) {
       setError("Please select a plan and password");
       return;
@@ -327,27 +312,19 @@ const AuthModal = ({ isOpen, onClose }) => {
       setupRecaptcha();
       const appVerifier = window.recaptchaVerifier;
       const formattedPhone = `+91${phone}`;
-      console.log("Sending OTP to:", formattedPhone); // Debug log
 
       const confirmation = await signInWithPhoneNumber(
         auth,
         formattedPhone,
         appVerifier
       );
-      console.log("OTP Sent!");
       setConfirmationResult(confirmation);
       setLoading(false);
       navigateTo("otp-verify");
     } catch (err) {
       console.error("Signup Error:", err);
       setLoading(false);
-      if (err.code === "auth/invalid-phone-number") {
-        setError("Invalid phone number format.");
-      } else if (err.code === "auth/unauthorized-domain") {
-        setError("Error: Add this domain to Firebase Authorized Domains.");
-      } else {
-        setError(err.message || "Failed to send OTP.");
-      }
+      setError(err.message || "Failed to send OTP.");
     }
   };
 
@@ -376,14 +353,13 @@ const AuthModal = ({ isOpen, onClose }) => {
 
       // If signing up, link credentials and save profile
       if (signupPassword) {
-        // B. Link Email/Password
         const credential = EmailAuthProvider.credential(email, signupPassword);
         await linkWithCredential(user, credential);
         await updateProfile(user, { displayName: fullName });
 
-        // C. Save Data (Added City)
         const appId = getAppId();
 
+        // Save User Profile
         await setDoc(
           doc(
             db,
@@ -399,7 +375,7 @@ const AuthModal = ({ isOpen, onClose }) => {
             email,
             phone,
             state: selectedState,
-            city, // Save City
+            city,
             pincode,
             plan: selectedPlan,
             promoCode,
@@ -408,16 +384,17 @@ const AuthModal = ({ isOpen, onClose }) => {
           }
         );
 
+        // Create Phone Lookup
         await setDoc(
           doc(db, "artifacts", appId, "public", "user_lookup", phone),
-          {
-            email: email,
-          }
+          { email: email }
         );
       }
 
+      // SUCCESS: Navigate to Dashboard
       setLoading(false);
       onClose();
+      navigate("/dashboard");
     } catch (err) {
       console.error(err);
       setLoading(false);
@@ -439,7 +416,6 @@ const AuthModal = ({ isOpen, onClose }) => {
     if (element.value && element.nextSibling) element.nextSibling.focus();
   };
 
-  // Helper for Strength Color
   const getStrengthColor = () => {
     if (strength === 0) return "bg-slate-200";
     if (strength <= 2) return "bg-red-500";

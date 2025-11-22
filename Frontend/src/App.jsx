@@ -1,39 +1,82 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 
-// Layout Components (Visible on all pages)
+
+// Public Components
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
-import ScrollToTop from "./components/ScrollToTop";
-
-// Page Components
 import Home from "./pages/Home";
-import Courses from "./pages/Courses"; 
+import Courses from "./pages/Courses";
 import ContactUs from "./pages/ContactUs";
+import Scroll from "./components/ScrollTop"
+
+
+// Dashboard Components
+import DashboardLayout from "./pages/DashboardLayout";
+import DashboardHome from "./pages/DashboardHome";
+import DashboardTraining from "./pages/DashboardTraining";
+import DashboardAgency from "./pages/DashboardAgency";
+import Profile from "./pages/Profile"; 
+import UpgradePlan from "./pages/UpgradePlan";
+import UpdatePassword from "./pages/UpdatePassword";
+
+
 const App = () => {
   return (
     <Router>
-      <ScrollToTop />
-        <div className="font-sans text-slate-900 selection:bg-orange-100 selection:text-orange-900 bg-white flex flex-col min-h-screen">
-          {/* 1. Navbar (Stays on top of every page) */}
-          <Navbar />
+     <Scroll/>
+      <Routes>
+        {/* PUBLIC ROUTES (With Public Navbar & Footer) */}
+        <Route
+          path="/"
+          element={
+            <>
+              <Navbar />
+              <div className="flex-grow">
+                <Home />
+              </div>
+              <Footer />
+            </>
+          }
+        />
 
-          {/* 2. Main Content Area (Changes based on URL) */}
-          <div className="flex-grow">
-            <Routes>
-              {/* The Home Page Route */}
-              <Route path="/" element={<Home />} />
+        <Route
+          path="/courses"
+          element={
+            <>
+              <Navbar />
+              <div className="flex-grow">
+                <Courses />
+              </div>
+              <Footer />
+            </>
+          }
+        />
 
-              {/* You can add more pages here later, e.g.: */}
-              <Route path="/Courses" element={<Courses />} />
-              <Route path="/contact" element={<ContactUs />} />
-            </Routes>
-          </div>
+        <Route
+          path="/contact"
+          element={
+            <>
+              <Navbar />
+              <div className="flex-grow">
+                <ContactUs />
+              </div>
+              <Footer />
+            </>
+          }
+        />
 
-          {/* 3. Footer (Stays at bottom of every page) */}
-          <Footer />
-        </div>
-     
+        {/* DASHBOARD ROUTES (Protected Layout) */}
+        <Route path="/dashboard" element={<DashboardLayout />}>
+          <Route index element={<DashboardHome />} />
+          <Route path="training" element={<DashboardTraining />} />
+          <Route path="agency" element={<DashboardAgency />} />
+          {/* Added Profile Route: Accessible at /dashboard/profile */}
+          <Route path="profile" element={<Profile />} />
+          <Route path="plans" element={<UpgradePlan />} />
+          <Route path="updatepassword" element={<UpdatePassword />} />
+        </Route>
+      </Routes>
     </Router>
   );
 };
