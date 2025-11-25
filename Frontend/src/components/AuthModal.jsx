@@ -17,6 +17,10 @@ import {
   Globe,
   Loader2,
   Building2,
+  Users,
+  AlertCircle,
+  Send,
+  CheckCircle2,
 } from "lucide-react";
 
 // --- Firebase Imports ---
@@ -26,6 +30,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
+  signOut,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
 
@@ -94,19 +100,20 @@ const INDIAN_STATES = [
 ];
 
 const PLANS = [
-  { id: "starter", name: "Pro Starter", price: 999 },
-  { id: "elite", name: "Premium Elite", price: 2499 },
-  { id: "supreme", name: "Supreme Master", price: 4999 },
+  { id: "starter", name: "Pro Starter" },
+  { id: "elite", name: "Premium Elite" },
+  { id: "supreme", name: "Supreme Master" },
 ];
 
 const AuthModal = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
 
-  // Views: 'login', 'signup-step-1', 'signup-step-2'
+  // Views: 'login', 'signup-step-1', 'signup-step-2', 'forgot-password'
   const [view, setView] = useState("login");
   const [direction, setDirection] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
   // --- Form States ---
   const [loginIdentifier, setLoginIdentifier] = useState("");
@@ -119,10 +126,18 @@ const AuthModal = ({ isOpen, onClose }) => {
   const [city, setCity] = useState("");
   const [pincode, setPincode] = useState("");
 
-  const [selectedPlan, setSelectedPlan] = useState("");
-  const [promoCode, setPromoCode] = useState("");
-  const [signupPassword, setSignupPassword] = useState("");
+  // Forgot Password State
+  const [resetEmail, setResetEmail] = useState("");
 
+  const [selectedPlan, setSelectedPlan] = useState("");
+
+  // --- New States ---
+  const [couponCode, setCouponCode] = useState("");
+  const [referralCode, setReferralCode] = useState("");
+  const [isCouponVerified, setIsCouponVerified] = useState(false);
+  const [couponMessage, setCouponMessage] = useState("");
+
+  const [signupPassword, setSignupPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [strength, setStrength] = useState(0);
 
@@ -139,11 +154,16 @@ const AuthModal = ({ isOpen, onClose }) => {
         setSelectedState("");
         setCity("");
         setPincode("");
+        setResetEmail("");
         setSelectedPlan("");
-        setPromoCode("");
+        setCouponCode("");
+        setReferralCode("");
+        setIsCouponVerified(false);
+        setCouponMessage("");
         setSignupPassword("");
         setStrength(0);
         setError("");
+        setSuccessMsg("");
         setLoading(false);
       }, 300);
     }
@@ -163,7 +183,6 @@ const AuthModal = ({ isOpen, onClose }) => {
     setStrength(score);
   }, [signupPassword]);
 
-  // --- Helpers ---
   const getAppId = () =>
     typeof __app_id !== "undefined" ? __app_id : "default-app";
 
@@ -171,9 +190,57 @@ const AuthModal = ({ isOpen, onClose }) => {
     setDirection(1);
     setView(newView);
     setError("");
+    setSuccessMsg("");
   };
 
-  // --- 1. Login (Phone/Email + Password) ---
+  // --- Forgot Password Logic ---
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    if (!resetEmail) {
+      setError("Please enter your registered email.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setSuccessMsg("");
+
+    try {
+      await sendPasswordResetEmail(auth, resetEmail);
+      setSuccessMsg("Reset link sent! Check your inbox.");
+      setResetEmail("");
+    } catch (err) {
+      console.error(err);
+      if (err.code === "auth/user-not-found") {
+        setError("No account found with this email.");
+      } else if (err.code === "auth/invalid-email") {
+        setError("Invalid email address.");
+      } else {
+        setError("Failed to send reset email. Try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Coupon Logic ---
+  const handleVerifyCoupon = () => {
+    setCouponMessage("");
+    if (!couponCode) {
+      setCouponMessage("Please enter a coupon code.");
+      return;
+    }
+
+    // Mock Validation
+    if (couponCode.toUpperCase() === "LIFE999") {
+      setIsCouponVerified(true);
+      setCouponMessage("Coupon Applied Successfully! ✅");
+    } else {
+      setIsCouponVerified(false);
+      setCouponMessage("Invalid Coupon Code ❌");
+    }
+  };
+
+  // --- Login Logic ---
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -185,7 +252,6 @@ const AuthModal = ({ isOpen, onClose }) => {
 
       if (isPhone) {
         const appId = getAppId();
-        // Path correction: removed 'public' to fix document reference error
         const lookupRef = doc(
           db,
           "artifacts",
@@ -203,7 +269,6 @@ const AuthModal = ({ isOpen, onClose }) => {
       }
 
       await signInWithEmailAndPassword(auth, emailToLogin, loginPassword);
-
       onClose();
       navigate("/dashboard");
     } catch (err) {
@@ -218,7 +283,6 @@ const AuthModal = ({ isOpen, onClose }) => {
     }
   };
 
-  // --- 2. Signup Step 1 ---
   const handleSignupStep1 = (e) => {
     e.preventDefault();
     if (!email || !fullName || !phone || !selectedState || !city || !pincode) {
@@ -228,38 +292,60 @@ const AuthModal = ({ isOpen, onClose }) => {
     navigateTo("signup-step-2");
   };
 
-  // --- 3. Signup Step 2: Create User & Initialize Payment ---
-  const handleSignupAndPay = async (e) => {
+  // --- MAIN SIGNUP LOGIC (With Duplicate Check & Rollback) ---
+  const handleSignup = async (e) => {
     e.preventDefault();
+
+    // 1. STRICT VALIDATION
     if (!selectedPlan || !signupPassword) {
       setError("Please select a plan and password");
       return;
     }
+    if (!isCouponVerified) {
+      setError("Please verify your Coupon Code first.");
+      return;
+    }
+    if (!referralCode) {
+      setError("Referral Code is mandatory.");
+      return;
+    }
+
     setLoading(true);
     setError("");
 
+    let userCreated = null;
+
     try {
-      // 1. Create Firebase User
+      const appId = getAppId();
+
+      // --- FIX: Check if Phone Number Already Exists ---
+      const phoneLookupRef = doc(db, "artifacts", appId, "user_lookup", phone);
+      const phoneLookupSnap = await getDoc(phoneLookupRef);
+
+      if (phoneLookupSnap.exists()) {
+        throw new Error("Phone number already registered. Please Login.");
+      }
+      // --------------------------------------------------
+
+      // 2. Create Auth User
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email,
         signupPassword
       );
-      const user = userCredential.user;
+      userCreated = userCredential.user;
 
-      await updateProfile(user, { displayName: fullName });
+      // 3. Update Profile
+      await updateProfile(userCreated, { displayName: fullName });
 
-      const appId = getAppId();
-      const planDetails = PLANS.find((p) => p.id === selectedPlan);
-
-      // 2. Save Initial Data to Firestore
+      // 4. Save Data to Firestore
       await setDoc(
         doc(
           db,
           "artifacts",
           appId,
           "users",
-          user.uid,
+          userCreated.uid,
           "profile",
           "account_info"
         ),
@@ -271,67 +357,52 @@ const AuthModal = ({ isOpen, onClose }) => {
           city,
           pincode,
           plan: selectedPlan,
-          planPrice: planDetails.price,
-          promoCode,
+          couponCode: couponCode.toUpperCase(),
+          referralCode: referralCode.toUpperCase(),
           joinedAt: new Date().toISOString(),
-          role: "student",
-          paymentStatus: "pending",
-          paymentId: null,
+          role: "Partner",
+          paymentStatus: "completed",
+          paymentId: "N/A",
         }
       );
 
-      // 3. Create Phone Lookup (Corrected Path)
+      // 5. Phone Lookup (Save AFTER successful creation)
       await setDoc(doc(db, "artifacts", appId, "user_lookup", phone), {
         email: email,
       });
 
-      // 4. Call Backend for Payment Link
-      // ✅ FIXED: Using 127.0.0.1 and Port 5001 for Mac Compatibility
-      // ... Upar ka code same rahega ...
-
-      // 4. Call Backend for Payment Link
-      const amount = planDetails.price;
-
-      // Note: URL 127.0.0.1:5001 hi rakhna Mac ke liye
-      const response = await fetch(
-        "http://127.0.0.1:5001/api/payment/initiate",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: user.uid,
-            amount: amount,
-            phone: phone,
-            planId: selectedPlan,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      console.log("Backend Response:", data); // <-- Console mein check karna
-
-      if (data.success && data.url) {
-        // Success: Redirect
-        window.location.href = data.url;
-      } else {
-        // Failure: Show specific error
-        alert("Payment Error: " + (data.error || "Unknown Error"));
-        console.error("Payment Details:", data);
-        setLoading(false);
-      }
-    } catch (err) {
-      console.error("Signup/Payment Error:", err);
+      // 6. Success
       setLoading(false);
+      onClose();
+      navigate("/dashboard");
+    } catch (err) {
+      console.error("Signup Error:", err);
+      setLoading(false);
+
+      // --- ROLLBACK LOGIC ---
+      if (userCreated) {
+        try {
+          await userCreated.delete(); // Delete "Ghost" account
+          await signOut(auth);
+          console.log("Rollback: User deleted due to setup failure.");
+        } catch (deleteErr) {
+          console.error(
+            "Rollback failed (User might need to re-login to delete):",
+            deleteErr
+          );
+          await signOut(auth);
+        }
+      }
+
       if (err.code === "auth/email-already-in-use") {
         setError("Email is already registered. Try logging in.");
       } else {
-        setError(err.message || "Signup failed.");
+        setError(err.message || "Registration failed. Please try again.");
       }
     }
   };
 
-  // --- UI Helpers ---
+  // ... UI Helpers ...
   const getStrengthColor = () => {
     if (strength === 0) return "bg-slate-200";
     if (strength <= 2) return "bg-red-500";
@@ -392,9 +463,15 @@ const AuthModal = ({ isOpen, onClose }) => {
 
                 <div className="relative z-10 text-center px-4 mt-2">
                   <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mb-1">
-                    {view.includes("login") ? "Welcome Back" : "Create Account"}
+                    {view === "forgot-password"
+                      ? "Reset Password"
+                      : view.includes("login")
+                      ? "Welcome Back"
+                      : "Create Account"}
                   </h2>
                   <p className="text-slate-400 text-xs sm:text-sm font-medium">
+                    {view === "forgot-password" &&
+                      "We'll send you a reset link"}
                     {view === "login" && "Login to your dashboard"}
                     {view.includes("signup") && "Join our community today"}
                   </p>
@@ -402,9 +479,17 @@ const AuthModal = ({ isOpen, onClose }) => {
               </div>
 
               <div className="flex-1 overflow-y-auto scrollbar-hide p-6 sm:p-8 relative bg-slate-50/50">
+                {/* Error Message */}
                 {error && (
-                  <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-500 text-xs font-bold text-center">
-                    {error}
+                  <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-500 text-xs font-bold text-center flex items-center justify-center gap-2">
+                    <AlertCircle className="w-4 h-4" /> {error}
+                  </div>
+                )}
+
+                {/* Success Message (For Forgot Password) */}
+                {successMsg && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-100 rounded-xl text-green-600 text-xs font-bold text-center flex items-center justify-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> {successMsg}
                   </div>
                 )}
 
@@ -441,7 +526,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             />
                           </div>
                         </div>
-
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                             Password
@@ -469,13 +553,15 @@ const AuthModal = ({ isOpen, onClose }) => {
                           </div>
                         </div>
 
+                        {/* Forgot Password Link */}
                         <div className="flex justify-end items-center pt-2">
-                          <a
-                            href="#"
+                          <button
+                            type="button"
+                            onClick={() => navigateTo("forgot-password")}
                             className="text-xs font-bold text-[#f7650b] hover:underline"
                           >
                             Forgot Password?
-                          </a>
+                          </button>
                         </div>
 
                         <button
@@ -504,7 +590,65 @@ const AuthModal = ({ isOpen, onClose }) => {
                     </motion.div>
                   )}
 
-                  {/* --- VIEW: SIGNUP STEP 1 (User Details) --- */}
+                  {/* --- VIEW: FORGOT PASSWORD --- */}
+                  {view === "forgot-password" && (
+                    <motion.div
+                      key="forgot-password"
+                      variants={slideVariants}
+                      initial="enter"
+                      animate="center"
+                      exit="exit"
+                      className="w-full"
+                    >
+                      <form
+                        onSubmit={handleForgotPassword}
+                        className="space-y-4"
+                      >
+                        <div className="text-sm text-slate-600 mb-4 text-center">
+                          Enter your email address and we'll send you a link to
+                          reset your password.
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase ml-1">
+                            Registered Email
+                          </label>
+                          <div className="relative">
+                            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <input
+                              type="email"
+                              value={resetEmail}
+                              onChange={(e) => setResetEmail(e.target.value)}
+                              className="w-full pl-12 pr-4 py-4 rounded-xl bg-white border border-slate-200 focus:outline-none focus:border-[#f7650b] transition-all font-medium text-slate-800 text-sm"
+                              placeholder="you@example.com"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          disabled={loading}
+                          className="w-full py-4 rounded-xl bg-[#f7650b] text-white font-bold text-base shadow-lg hover:bg-orange-600 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
+                        >
+                          {loading ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          ) : (
+                            "Send Reset Link"
+                          )}{" "}
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </form>
+
+                      <div className="mt-6 text-center">
+                        <button
+                          onClick={() => navigateTo("login")}
+                          className="text-sm font-bold text-slate-600 hover:text-slate-900 flex items-center justify-center gap-2 mx-auto"
+                        >
+                          <ArrowLeft className="w-4 h-4" /> Back to Login
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* --- SIGNUP STEP 1 --- */}
                   {view === "signup-step-1" && (
                     <motion.div
                       key="signup-step-1"
@@ -515,7 +659,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                       className="w-full"
                     >
                       <form onSubmit={handleSignupStep1} className="space-y-3">
-                        {/* Email & Name */}
                         <div className="relative">
                           <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input
@@ -554,7 +697,7 @@ const AuthModal = ({ isOpen, onClose }) => {
                           />
                         </div>
 
-                        {/* State & City Row */}
+                        {/* Added State & City Row */}
                         <div className="grid grid-cols-2 gap-3">
                           <div className="relative">
                             <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -587,7 +730,7 @@ const AuthModal = ({ isOpen, onClose }) => {
                           </div>
                         </div>
 
-                        {/* Pincode */}
+                        {/* Added Pincode */}
                         <div className="relative">
                           <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input
@@ -603,7 +746,7 @@ const AuthModal = ({ isOpen, onClose }) => {
                           />
                         </div>
 
-                        <button className="w-full mt-2 py-3.5 rounded-xl bg-slate-900 text-white font-bold text-base hover:bg-[#f7650b] transition-all flex items-center justify-center gap-2">
+                        <button className="w-full mt-4 py-3.5 rounded-xl bg-slate-900 text-white font-bold text-base hover:bg-[#f7650b] transition-all flex items-center justify-center gap-2">
                           Next Page <ArrowRight className="w-4 h-4" />
                         </button>
                       </form>
@@ -618,7 +761,7 @@ const AuthModal = ({ isOpen, onClose }) => {
                     </motion.div>
                   )}
 
-                  {/* --- VIEW: SIGNUP STEP 2 (Plan & Payment) --- */}
+                  {/* --- SIGNUP STEP 2 --- */}
                   {view === "signup-step-2" && (
                     <motion.div
                       key="signup-step-2"
@@ -628,7 +771,8 @@ const AuthModal = ({ isOpen, onClose }) => {
                       exit="exit"
                       className="w-full"
                     >
-                      <form onSubmit={handleSignupAndPay} className="space-y-4">
+                      <form onSubmit={handleSignup} className="space-y-4">
+                        {/* Plan */}
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                             Select Your Plan
@@ -646,31 +790,85 @@ const AuthModal = ({ isOpen, onClose }) => {
                               </option>
                               {PLANS.map((p) => (
                                 <option key={p.id} value={p.id}>
-                                  {p.name} - ₹{p.price}
+                                  {p.name}
                                 </option>
                               ))}
                             </select>
                           </div>
                         </div>
+
+                        {/* Referral Code */}
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
-                            Promo Code
+                            Referral Code{" "}
+                            <span className="text-red-500">*</span>
                           </label>
                           <div className="relative">
-                            <Ticket className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <Users className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                             <input
                               type="text"
-                              placeholder="Optional"
-                              value={promoCode}
+                              required
+                              placeholder="Enter Staff Referral Code"
+                              value={referralCode}
                               onChange={(e) =>
-                                setPromoCode(e.target.value.toUpperCase())
+                                setReferralCode(e.target.value.toUpperCase())
                               }
                               className="w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border border-slate-200 focus:border-[#f7650b] transition-all text-sm font-medium outline-none"
                             />
                           </div>
                         </div>
 
-                        {/* Password Field */}
+                        {/* Coupon Code */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase ml-1">
+                            Coupon Code <span className="text-red-500">*</span>
+                          </label>
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <Ticket className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                              <input
+                                type="text"
+                                required
+                                placeholder="Enter Coupon (e.g. LIFE999)"
+                                value={couponCode}
+                                onChange={(e) => {
+                                  setCouponCode(e.target.value.toUpperCase());
+                                  setIsCouponVerified(false);
+                                  setCouponMessage("");
+                                }}
+                                className={`w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border transition-all text-sm font-medium outline-none ${
+                                  isCouponVerified
+                                    ? "border-green-500 focus:border-green-500"
+                                    : "border-slate-200 focus:border-[#f7650b]"
+                                }`}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleVerifyCoupon}
+                              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
+                                isCouponVerified
+                                  ? "bg-green-50 text-green-600 border-green-200 cursor-default"
+                                  : "bg-slate-900 text-white hover:bg-slate-800 border-slate-900"
+                              }`}
+                            >
+                              {isCouponVerified ? "Applied" : "Verify"}
+                            </button>
+                          </div>
+                          {couponMessage && (
+                            <div
+                              className={`text-xs font-bold mt-1 ml-1 ${
+                                isCouponVerified
+                                  ? "text-green-600"
+                                  : "text-red-500"
+                              }`}
+                            >
+                              {couponMessage}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Password */}
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                             Create Password
@@ -699,8 +897,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                               )}
                             </button>
                           </div>
-
-                          {/* Strength Bar */}
                           {signupPassword && (
                             <div className="mt-2">
                               <div className="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
@@ -741,14 +937,16 @@ const AuthModal = ({ isOpen, onClose }) => {
                           </button>
                           <button
                             type="submit"
-                            disabled={loading}
-                            className="flex-1 py-3.5 rounded-xl bg-[#f7650b] text-white font-bold text-base hover:bg-orange-600 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
+                            disabled={
+                              loading || !isCouponVerified || !referralCode
+                            }
+                            className="flex-1 py-3.5 rounded-xl bg-[#f7650b] text-white font-bold text-base hover:bg-orange-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {loading ? (
                               <Loader2 className="w-5 h-5 animate-spin" />
                             ) : (
                               <>
-                                Pay & Register{" "}
+                                Complete Registration{" "}
                                 <ArrowRight className="w-5 h-5" />
                               </>
                             )}
