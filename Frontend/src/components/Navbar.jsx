@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Home,
   BookOpen,
-  FileText,
   CreditCard,
   Mail,
   LogIn,
@@ -28,8 +27,7 @@ const Navbar = () => {
   // Navigation Links Configuration
   const navLinks = [
     { name: "Home", path: "/", icon: Home },
-    { name: "Courses", path: "/courses", icon: BookOpen },
-    { name: "Blog", path: "/blog", icon: FileText },
+    { name: "Services", path: "/services", icon: BookOpen }, // Courses -> Services
     { name: "Pricing", path: "/pricing", icon: CreditCard },
     { name: "Contact", path: "/contact", icon: Mail },
   ];
@@ -144,7 +142,7 @@ const Navbar = () => {
                     />
                   )}
 
-                  {/* Icon (FIXED: Removed 'fill-current' to keep icons outlined and clear) */}
+                  {/* Icon */}
                   <div
                     className={`relative ${
                       isActive ? "-translate-y-0.5" : "translate-y-0"

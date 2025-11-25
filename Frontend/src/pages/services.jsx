@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -154,7 +154,7 @@ const itemVariants = {
   },
 };
 
-const Courses = () => {
+const Services = () => {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -361,7 +361,7 @@ const Courses = () => {
         <motion.div layout className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
           <AnimatePresence mode="popLayout">
             {filteredCourses.length > 0 ? (
-              filteredCourses.map((course, index) => (
+              filteredCourses.map((course) => (
                 <motion.div
                   layout
                   key={course.id}
@@ -579,4 +579,4 @@ const Courses = () => {
   );
 };
 
-export default Courses;
+export default Services;

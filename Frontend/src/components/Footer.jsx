@@ -12,7 +12,7 @@ import {
 
 const footerLinks = {
   Product: [
-    { name: "Courses", href: "#" },
+    { name: "Services", href: "#" },
     { name: "Mentorship", href: "#" },
     { name: "Pricing", href: "#" },
     { name: "Certificates", href: "#" },
