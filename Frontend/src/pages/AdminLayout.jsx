@@ -7,7 +7,7 @@ const AdminLayout = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <AdminNavbar />
-      <div className="flex-grow pt-20 md:pt-24 pb-20 md:pb-8">
+      <div className="flex-grow pt-2 md:pt-2 pb-20 md:pb-8">
         <Outlet />
       </div>
       <AdminFooter />

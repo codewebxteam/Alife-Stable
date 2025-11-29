@@ -26,6 +26,8 @@ import {
   Copy,
   Loader2,
   Crown,
+  ShieldCheck,
+  AlertTriangle,
 } from "lucide-react";
 import { getAuth } from "firebase/auth";
 import {
@@ -35,6 +37,8 @@ import {
   onSnapshot,
   serverTimestamp,
   addDoc,
+  updateDoc,
+  doc,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
@@ -79,13 +83,13 @@ const getStatusConfig = (status) => {
     };
   if (s.includes("pending") || s.includes("approval"))
     return {
-      icon: Lightbulb,
+      icon: Clock,
       text: "text-amber-700",
       bg: "bg-amber-50",
       border: "border-amber-200",
-      label: "Pending",
+      label: "Pending Approval",
     };
-  if (s.includes("progress") || s.includes("processing"))
+  if (s.includes("progress"))
     return {
       icon: Zap,
       text: "text-blue-700",
@@ -93,26 +97,26 @@ const getStatusConfig = (status) => {
       border: "border-blue-200",
       label: "In Progress",
     };
-  if (s.includes("cancel") || s.includes("reject"))
+  if (s.includes("reject") || s.includes("cancel"))
     return {
       icon: XCircle,
       text: "text-red-700",
       bg: "bg-red-50",
       border: "border-red-200",
-      label: "Cancelled",
+      label: "Rejected",
     };
   return {
-    icon: Clock,
+    icon: AlertTriangle,
     text: "text-slate-700",
     bg: "bg-slate-50",
     border: "border-slate-200",
-    label: status,
+    label: status?.replace(/_/g, " ") || "Unknown",
   };
 };
 
 // --- 2. COMPONENTS ---
 
-const SalesTrendChart = ({ data }) => {
+const SalesTrendChart = ({ data, type }) => {
   if (!data || data.length === 0)
     return (
       <div className="h-48 flex items-center justify-center text-slate-400 text-xs font-medium bg-slate-50/50 rounded-2xl border border-slate-100">
@@ -215,8 +219,9 @@ const PackageCountCard = ({ title, count, type, onClick }) => (
   </motion.div>
 );
 
-// --- MODALS ---
+// --- 3. MODALS ---
 
+// Order Details
 const OrderDetailsModal = ({ isOpen, onClose, order }) => {
   const [copied, setCopied] = useState("");
   if (!order) return null;
@@ -247,10 +252,10 @@ const OrderDetailsModal = ({ isOpen, onClose, order }) => {
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               className="bg-white w-full max-w-2xl rounded-2xl sm:rounded-[2rem] shadow-2xl overflow-hidden pointer-events-auto flex flex-col max-h-[85vh] sm:max-h-[90vh]"
             >
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
                 <div>
                   <div className="flex items-center gap-3">
-                    <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+                    <h2 className="text-xl font-bold text-slate-900">
                       Order Details
                     </h2>
                     <div
@@ -279,7 +284,7 @@ const OrderDetailsModal = ({ isOpen, onClose, order }) => {
                 </button>
               </div>
               <div
-                className="p-5 overflow-y-auto custom-scrollbar space-y-6"
+                className="p-6 overflow-y-auto custom-scrollbar space-y-6"
                 data-lenis-prevent
               >
                 <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
@@ -439,19 +444,19 @@ const OrderDetailsModal = ({ isOpen, onClose, order }) => {
                     <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">
                       Status
                     </p>
-                    <div className="flex items-center gap-2">
-                      <p
-                        className={`text-lg font-black ${
-                          order.payment?.due <= 0
-                            ? "text-emerald-600"
-                            : "text-red-500"
-                        }`}
-                      >
-                        {order.payment?.due <= 0
-                          ? "Paid"
-                          : `Due: ₹${order.payment?.due}`}
+                    {order.paymentStatus === "Verification_Pending" ? (
+                      <div className="flex items-center gap-1 text-amber-600 font-bold">
+                        <AlertTriangle size={14} /> Verifying...
+                      </div>
+                    ) : order.payment?.due <= 0 ? (
+                      <div className="flex items-center gap-1 text-emerald-600 font-bold">
+                        <CheckCircle2 size={14} /> Paid
+                      </div>
+                    ) : (
+                      <p className="text-lg font-black text-red-500">
+                        Due: ₹{order.payment?.due}
                       </p>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -463,6 +468,176 @@ const OrderDetailsModal = ({ isOpen, onClose, order }) => {
   );
 };
 
+// Payment Request Modal (Sends to DB)
+const PaymentUpdateModal = ({ isOpen, onClose, order }) => {
+  const [amount, setAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  if (!order) return null;
+  const totalBuyPrice = parseFloat(order.pricing?.priceToAdmin || 0);
+  const paidAlready = parseFloat(order.payment?.paid || 0);
+  const due = totalBuyPrice - paidAlready;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!amount || parseFloat(amount) <= 0) return;
+
+    setLoading(true);
+    try {
+      // WRITE TO FIRESTORE: This triggers the Admin Notification
+      await updateDoc(doc(db, "orders", order.id), {
+        paymentStatus: "Verification_Pending",
+        paymentRequestAmount: parseFloat(amount),
+        lastPaymentRequestDate: serverTimestamp(),
+      });
+
+      setSubmitted(true);
+      setTimeout(() => {
+        setSubmitted(false);
+        setAmount("");
+        onClose();
+      }, 2000);
+    } catch (error) {
+      console.error("Error submitting payment:", error);
+      alert("Failed to submit payment. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[120]"
+            onClick={onClose}
+          />
+          <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden pointer-events-auto"
+            >
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <div>
+                  <h3 className="font-bold text-lg text-slate-900">
+                    Update Payment
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Order:{" "}
+                    <span className="font-mono text-slate-700">
+                      {order.displayId}
+                    </span>
+                  </p>
+                </div>
+                <button
+                  onClick={onClose}
+                  className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-6">
+                {submitted ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4">
+                      <CheckCircle2 size={32} />
+                    </div>
+                    <h4 className="text-xl font-bold text-slate-900">
+                      Request Sent!
+                    </h4>
+                    <p className="text-sm text-slate-500 mt-2">
+                      Admin will verify your payment of ₹{amount}.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-3 gap-2 mb-6">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase">
+                          Total
+                        </div>
+                        <div className="text-sm font-black text-slate-800">
+                          ₹{totalBuyPrice}
+                        </div>
+                      </div>
+                      <div className="p-3 bg-green-50 rounded-xl border border-green-100 text-center">
+                        <div className="text-[10px] text-green-600 font-bold uppercase">
+                          Paid
+                        </div>
+                        <div className="text-sm font-black text-green-700">
+                          ₹{paidAlready}
+                        </div>
+                      </div>
+                      <div className="p-3 bg-red-50 rounded-xl border border-red-100 text-center">
+                        <div className="text-[10px] text-red-600 font-bold uppercase">
+                          Due
+                        </div>
+                        <div className="text-sm font-black text-red-700">
+                          ₹{due}
+                        </div>
+                      </div>
+                    </div>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          Amount Paid
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">
+                            ₹
+                          </span>
+                          <input
+                            type="number"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            max={due}
+                            className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:outline-none focus:border-[#f7650b]"
+                            placeholder="0.00"
+                            required
+                          />
+                        </div>
+                      </div>
+                      <div className="bg-blue-50 p-3 rounded-xl flex gap-2 items-start border border-blue-100">
+                        <ShieldCheck
+                          size={16}
+                          className="text-blue-600 mt-0.5"
+                        />
+                        <p className="text-xs text-blue-700">
+                          This request will be sent to the Admin. Once verified,
+                          your Due amount will be updated.
+                        </p>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={loading || due <= 0}
+                        className="w-full py-3.5 rounded-xl bg-[#f7650b] text-white font-bold text-sm shadow-lg shadow-orange-500/20 hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {loading ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          "Submit Payment Request"
+                        )}
+                      </button>
+                    </form>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+};
+
+// Member Details
 const MemberDetailsModal = ({ isOpen, onClose, title, members }) => (
   <AnimatePresence>
     {isOpen && (
@@ -572,149 +747,6 @@ const MemberDetailsModal = ({ isOpen, onClose, title, members }) => (
   </AnimatePresence>
 );
 
-const PaymentUpdateModal = ({ isOpen, onClose, order }) => {
-  const [amount, setAmount] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  if (!order) return null;
-  const totalBuyPrice = parseFloat(order.pricing?.priceToAdmin || 0);
-  const paidAlready = parseFloat(order.payment?.paid || 0);
-  const due = totalBuyPrice - paidAlready;
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setSubmitted(true);
-      setTimeout(() => {
-        setSubmitted(false);
-        setAmount("");
-        onClose();
-      }, 2000);
-    }, 1500);
-  };
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[120]"
-            onClick={onClose}
-          />
-          <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 pointer-events-none">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden pointer-events-auto"
-            >
-              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <div>
-                  <h3 className="font-bold text-lg text-slate-900">
-                    Update Payment
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Order:{" "}
-                    <span className="font-mono text-slate-700">
-                      {order.displayId}
-                    </span>
-                  </p>
-                </div>
-                <button
-                  onClick={onClose}
-                  className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-              <div className="p-6">
-                {submitted ? (
-                  <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4">
-                      <CheckCircle2 size={32} />
-                    </div>
-                    <h4 className="text-xl font-bold text-slate-900">
-                      Submitted!
-                    </h4>
-                    <p className="text-sm text-slate-500 mt-2">
-                      Payment sent for Verification.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-3 gap-2 mb-6">
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                        <div className="text-[10px] text-slate-400 font-bold uppercase">
-                          Total
-                        </div>
-                        <div className="text-sm font-black text-slate-800">
-                          ₹{totalBuyPrice}
-                        </div>
-                      </div>
-                      <div className="p-3 bg-green-50 rounded-xl border border-green-100 text-center">
-                        <div className="text-[10px] text-green-600 font-bold uppercase">
-                          Paid
-                        </div>
-                        <div className="text-sm font-black text-green-700">
-                          ₹{paidAlready}
-                        </div>
-                      </div>
-                      <div className="p-3 bg-red-50 rounded-xl border border-red-100 text-center">
-                        <div className="text-[10px] text-red-600 font-bold uppercase">
-                          Due
-                        </div>
-                        <div className="text-sm font-black text-red-700">
-                          ₹{due}
-                        </div>
-                      </div>
-                    </div>
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                          Amount
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">
-                            ₹
-                          </span>
-                          <input
-                            type="number"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            max={due}
-                            className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:outline-none focus:border-[#f7650b]"
-                            placeholder="0.00"
-                            required
-                          />
-                        </div>
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={loading || due <= 0}
-                        className="w-full py-3.5 rounded-xl bg-[#f7650b] text-white font-bold text-sm shadow-lg shadow-orange-500/20 hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {loading ? (
-                          <Loader2 className="animate-spin" />
-                        ) : (
-                          "Submit Payment"
-                        )}
-                      </button>
-                    </form>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        </>
-      )}
-    </AnimatePresence>
-  );
-};
-
 // --- MAIN DASHBOARD ---
 const DashboardHome = () => {
   const auth = getAuth();
@@ -725,6 +757,8 @@ const DashboardHome = () => {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Modals
   const [memberModal, setMemberModal] = useState({
     isOpen: false,
     title: "",
@@ -1004,13 +1038,13 @@ const DashboardHome = () => {
   ];
 
   return (
-    <main className="min-h-screen bg-[#f8fafc] font-sans pb-10 overflow-x-hidden">
+    <main className="min-h-screen bg-[#f8fafc] font-sans pb-10 overflow-x-hidden pt-4 sm:pt-6">
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-orange-100/30 rounded-full blur-[120px] translate-x-1/2 -translate-y-1/2" />
         <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-100/30 rounded-full blur-[100px] -translate-x-1/2 translate-y-1/2" />
       </div>
 
-      <div className="relative z-10 max-w-[1400px] mx-auto px-4 sm:px-6 md:px-8 pt-6 sm:pt-8">
+      <div className="relative z-10 max-w-[1400px] mx-auto px-4 sm:px-6 md:px-8">
         {/* HEADER */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
           <div>
@@ -1089,11 +1123,10 @@ const DashboardHome = () => {
         </div>
 
         <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 mb-12 items-start">
-          {/* LEFT COLUMN: Financials + Table */}
+          {/* LEFT COLUMN */}
           <div className="lg:col-span-8 flex flex-col gap-5">
             {/* 1. FINANCIAL BAR */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Wallet */}
               <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2rem] p-5 text-white shadow-lg relative overflow-hidden flex flex-col justify-between h-auto sm:h-40 gap-4 sm:gap-0">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-2xl pointer-events-none"></div>
                 <div className="flex items-center gap-3 relative z-10">
@@ -1110,7 +1143,7 @@ const DashboardHome = () => {
                   </div>
                 </div>
                 <div className="flex gap-4 relative z-10">
-                  <div className="flex-1 p-3 rounded-xl bg-white/5 border border-white/10">
+                  <div className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10">
                     <div className="text-[9px] text-slate-400 font-bold uppercase mb-0.5">
                       Paid
                     </div>
@@ -1118,7 +1151,7 @@ const DashboardHome = () => {
                       ₹{financialStats.totalPaid.toLocaleString()}
                     </div>
                   </div>
-                  <div className="flex-1 p-3 rounded-xl bg-white/5 border border-white/10">
+                  <div className="flex-1 p-2.5 rounded-xl bg-white/5 border border-white/10">
                     <div className="text-[9px] text-slate-400 font-bold uppercase mb-0.5">
                       Due
                     </div>
@@ -1128,7 +1161,6 @@ const DashboardHome = () => {
                   </div>
                 </div>
               </div>
-              {/* Upgrade */}
               <div className="bg-indigo-600 rounded-[2rem] p-5 text-white shadow-lg relative overflow-hidden flex flex-col justify-between h-auto sm:h-40 gap-4 sm:gap-0">
                 <div className="absolute bottom-0 left-0 w-40 h-40 bg-indigo-500 rounded-full -ml-10 -mb-10 blur-2xl pointer-events-none"></div>
                 <div className="flex items-center gap-3 relative z-10">
