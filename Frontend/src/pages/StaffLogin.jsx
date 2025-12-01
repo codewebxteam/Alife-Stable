@@ -2,7 +2,14 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
-import { Lock, Mail, ArrowRight, Loader2, ShieldCheck } from "lucide-react";
+import {
+  Lock,
+  Mail,
+  ArrowRight,
+  Loader2,
+  ShieldCheck,
+  AlertCircle,
+} from "lucide-react";
 import Logo from "../components/Logo";
 
 const StaffLogin = () => {
@@ -21,12 +28,18 @@ const StaffLogin = () => {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // Auth listener in App or Dashboard will handle redirection,
-      // but we force push to dashboard to trigger the check
       navigate("/staff/dashboard");
     } catch (err) {
-      setError("Invalid credentials. Access denied.");
       console.error(err);
+      // Detailed Error Handling
+      let msg = "Invalid credentials. Access denied.";
+      if (err.code === "auth/user-not-found")
+        msg = "No staff account found with this email.";
+      if (err.code === "auth/wrong-password")
+        msg = "Incorrect password. Please try again.";
+      if (err.code === "auth/too-many-requests")
+        msg = "Too many attempts. Try again later.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -34,7 +47,6 @@ const StaffLogin = () => {
 
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Background Effects */}
       <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-[120px]" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[120px]" />
 
@@ -45,8 +57,7 @@ const StaffLogin = () => {
         className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden relative z-10"
       >
         <div className="h-32 bg-slate-50 flex flex-col items-center justify-center border-b border-slate-100 relative">
-          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-5" />
-          <div className="scale-150 mb-2 opacity-90">
+          <div className="scale-125 mb-2 opacity-90">
             <Logo />
           </div>
           <h2 className="text-xl font-black text-slate-900 tracking-tight">
@@ -63,9 +74,14 @@ const StaffLogin = () => {
           </div>
 
           {error && (
-            <div className="mb-6 p-3 bg-red-50 border border-red-100 text-red-500 text-xs font-bold rounded-xl text-center">
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 bg-red-50 border border-red-100 text-red-600 text-xs font-bold rounded-xl flex items-center gap-2"
+            >
+              <AlertCircle size={16} />
               {error}
-            </div>
+            </motion.div>
           )}
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -111,16 +127,10 @@ const StaffLogin = () => {
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 "Access Dashboard"
-              )}
+              )}{" "}
               {!loading && <ArrowRight className="w-5 h-5" />}
             </button>
           </form>
-        </div>
-
-        <div className="bg-slate-50 py-4 text-center border-t border-slate-100">
-          <p className="text-[10px] text-slate-400 font-medium">
-            Authorized Personnel Only • IP Logged
-          </p>
         </div>
       </motion.div>
     </div>

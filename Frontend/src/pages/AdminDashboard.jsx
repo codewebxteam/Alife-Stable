@@ -50,22 +50,16 @@ const formatPrice = (value) => {
   return `₹${num.toLocaleString("en-IN")}`;
 };
 
-// --- FIX: AGGRESSIVE SCROLL LOCK HOOK ---
+// Scroll Lock Hook
 const useScrollLock = () => {
   useEffect(() => {
-    // Calculate scrollbar width to prevent layout shift
     const scrollbarWidth =
       window.innerWidth - document.documentElement.clientWidth;
-
-    // Apply strict styles to lock scrolling
     const originalBodyStyle = document.body.style.cssText;
     const originalHtmlStyle = document.documentElement.style.cssText;
-
     document.body.style.cssText = `overflow: hidden !important; padding-right: ${scrollbarWidth}px;`;
     document.documentElement.style.cssText = `overflow: hidden !important;`;
-
     return () => {
-      // Restore original styles
       document.body.style.cssText = originalBodyStyle;
       document.documentElement.style.cssText = originalHtmlStyle;
     };
@@ -81,6 +75,17 @@ const PLAN_PRICES = {
   "supreme master": 4999,
   growth: 2499,
   agency: 4999,
+};
+
+// Helper to safely check roles (Handles String OR Array)
+const hasRole = (user, targetRole) => {
+  const roleData = user.role;
+  const target = targetRole.toLowerCase();
+
+  if (Array.isArray(roleData)) {
+    return roleData.some((r) => (r || "").toLowerCase() === target);
+  }
+  return (roleData || "").toLowerCase() === target;
 };
 
 const getStatusConfig = (status) => {
@@ -574,12 +579,9 @@ const MembersListModal = ({ isOpen, onClose, partners }) => {
   useScrollLock();
   if (!isOpen) return null;
 
-  // Filter for both "member" and "partner", sort by date, take last 5
+  // FIXED: Robust check using hasRole helper + sort + limit
   const displayItems = partners
-    .filter((p) => {
-      const r = (p.role || "").toLowerCase();
-      return r === "member" || r === "partner";
-    })
+    .filter((p) => hasRole(p, "partner") || hasRole(p, "member"))
     .sort((a, b) => b.createdAtDate - a.createdAtDate)
     .slice(0, 5);
 
@@ -785,7 +787,12 @@ const PaymentVerificationModal = ({ isOpen, onClose, order }) => {
   if (!isOpen || !order) return null;
   const totalCost = parseFloat(order.pricing?.priceToAdmin || 0);
   const currentlyPaid = parseFloat(order.paidAmount || 0);
-  const remainingDue = totalCost - currentlyPaid;
+
+  // --- FIX: DUE AMOUNT IS 0 IF CANCELLED ---
+  const s = (order.status || "").toLowerCase();
+  const isCancelled = s.includes("cancel") || s.includes("reject");
+  const remainingDue = isCancelled ? 0 : totalCost - currentlyPaid;
+
   const isProgress = order.status === "In_Progress";
   const handleVerifyPayment = async () => {
     setLoading(true);
@@ -963,16 +970,23 @@ const AdminDashboard = () => {
           const dateObj = d.createdAt?.toDate
             ? d.createdAt.toDate()
             : new Date();
+
+          // --- FIX: DUE AMOUNT IS 0 IF CANCELLED ---
+          const s = (d.status || "").toLowerCase();
+          const isCancelled = s.includes("cancel") || s.includes("reject");
+
           return {
             id: doc.id,
             ...d,
             adminPrice: parseFloat(d.pricing?.priceToAdmin || 0),
             paidAmount: parseFloat(d.paidAmount || 0),
-            dueAmount: Math.max(
-              0,
-              parseFloat(d.pricing?.priceToAdmin || 0) -
-                parseFloat(d.paidAmount || 0)
-            ),
+            dueAmount: isCancelled
+              ? 0
+              : Math.max(
+                  0,
+                  parseFloat(d.pricing?.priceToAdmin || 0) -
+                    parseFloat(d.paidAmount || 0)
+                ),
             createdAtDate: dateObj,
             dateFormatted: dateObj.toLocaleDateString("en-IN", {
               day: "numeric",
@@ -1072,9 +1086,7 @@ const AdminDashboard = () => {
 
     // Partners
     const partnerUsers = filteredPartners.filter(
-      (p) =>
-        (p.role || "").toLowerCase() === "partner" ||
-        (p.role || "").toLowerCase() === "member"
+      (p) => hasRole(p, "partner") || hasRole(p, "member")
     );
     let starter = 0,
       booster = 0,

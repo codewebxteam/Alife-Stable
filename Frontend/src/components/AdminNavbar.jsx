@@ -10,6 +10,8 @@ import {
   Lock,
   Menu,
   X,
+  GraduationCap, // Added for Academy
+  Database, // Added for Data
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { getAuth, signOut } from "firebase/auth";
@@ -50,6 +52,18 @@ const AdminNavbar = () => {
       name: "Staff Performance",
       path: "/admin/staff",
       icon: Users,
+      end: false,
+    },
+    {
+      name: "Academy",
+      path: "/admin/academy",
+      icon: GraduationCap,
+      end: false,
+    },
+    {
+      name: "Data",
+      path: "/admin/data",
+      icon: Database,
       end: false,
     },
   ];
