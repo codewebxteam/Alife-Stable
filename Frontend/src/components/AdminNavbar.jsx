@@ -6,12 +6,8 @@ import {
   Ticket,
   LogOut,
   ChevronDown,
-  ShieldCheck,
   Lock,
-  Menu,
-  X,
-  GraduationCap, // Added for Academy
-  Database, // Added for Data
+  Database,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { getAuth, signOut } from "firebase/auth";
@@ -20,7 +16,6 @@ import Logo from "./Logo";
 const AdminNavbar = () => {
   const [scrolled, setScrolled] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const auth = getAuth();
   const navigate = useNavigate();
@@ -47,17 +42,22 @@ const AdminNavbar = () => {
   };
 
   const navLinks = [
-    { name: "Dashboard", path: "/admin", icon: LayoutDashboard, end: true },
+    {
+      name: "Dashboard",
+      path: "/admin",
+      icon: LayoutDashboard,
+      end: true,
+    },
+    {
+      name: "Sales & Orders",
+      path: "/admin/orders",
+      icon: Ticket,
+      end: false,
+    },
     {
       name: "Staff Performance",
       path: "/admin/staff",
       icon: Users,
-      end: false,
-    },
-    {
-      name: "Academy",
-      path: "/admin/academy",
-      icon: GraduationCap,
       end: false,
     },
     {

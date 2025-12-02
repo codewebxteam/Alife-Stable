@@ -26,6 +26,8 @@ import UpdatePassword from "./pages/UpdatePassword";
 import AdminLayout from "./pages/AdminLayout";
 import AdminDashboard from "./pages/AdminDashboard";
 import StaffPerformance from "./pages/StaffPerformance";
+import SalesOrders from "./pages/SalesOrders"; // NEW: Create this file
+import AdminData from "./pages/AdminData"; // NEW: Create this file
 
 // Staff Portal (NEW)
 import StaffLogin from "./pages/StaffLogin";
@@ -100,7 +102,10 @@ const App = () => {
           {/* ADMIN DASHBOARD ROUTES */}
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
+            <Route path="orders" element={<SalesOrders />} />{" "}
+            {/* Maps to "Sales & Orders" */}
             <Route path="staff" element={<StaffPerformance />} />
+            <Route path="data" element={<AdminData />} /> {/* Maps to "Data" */}
           </Route>
 
           {/* STAFF PORTAL ROUTES */}
