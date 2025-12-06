@@ -29,6 +29,13 @@ import {
   Mail,
   Phone,
   Filter,
+  Ticket,
+  UserPlus,
+  Activity,
+  PlayCircle,
+  FileText,
+  CheckCircle,
+  User,
 } from "lucide-react";
 import {
   collection,
@@ -40,14 +47,17 @@ import {
   collectionGroup,
   addDoc,
   serverTimestamp,
+  arrayUnion,
+  getDoc,
 } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import { db } from "../firebase.js";
 
 // --- 1. UTILITIES ---
 const formatPrice = (value) => {
-  if (!value && value !== 0) return "₹0";
-  const num = Number(value.toString().replace(/[^0-9.-]+/g, ""));
-  return `₹${num.toLocaleString("en-IN")}`;
+  const val = Number(value);
+  if (!val && val !== 0) return "₹0";
+  return `₹${val.toLocaleString("en-IN")}`;
 };
 
 // Scroll Lock Hook
@@ -77,63 +87,19 @@ const PLAN_PRICES = {
   agency: 4999,
 };
 
-// Helper to safely check roles (Handles String OR Array)
+// Helper to safely check roles
 const hasRole = (user, targetRole) => {
   const roleData = user.role;
   const target = targetRole.toLowerCase();
-
   if (Array.isArray(roleData)) {
     return roleData.some((r) => (r || "").toLowerCase() === target);
   }
   return (roleData || "").toLowerCase() === target;
 };
 
-const getStatusConfig = (status) => {
-  const s = (status || "").toLowerCase();
-  if (s.includes("completed") || s.includes("delivered"))
-    return {
-      icon: Check,
-      text: "text-emerald-700",
-      bg: "bg-emerald-50",
-      border: "border-emerald-200",
-      label: "Completed",
-    };
-  if (s.includes("pending") || s.includes("approval"))
-    return {
-      icon: Clock,
-      text: "text-amber-700",
-      bg: "bg-amber-50",
-      border: "border-amber-200",
-      label: "Pending",
-    };
-  if (s.includes("progress"))
-    return {
-      icon: Zap,
-      text: "text-blue-700",
-      bg: "bg-blue-50",
-      border: "border-blue-200",
-      label: "In Progress",
-    };
-  if (s.includes("reject") || s.includes("cancel"))
-    return {
-      icon: X,
-      text: "text-rose-700",
-      bg: "bg-rose-50",
-      border: "border-rose-200",
-      label: "Cancelled",
-    };
-  return {
-    icon: AlertCircle,
-    text: "text-slate-700",
-    bg: "bg-slate-50",
-    border: "border-slate-200",
-    label: status?.replace(/_/g, " ") || "Unknown",
-  };
-};
-
 // --- 2. SUB-COMPONENTS ---
 
-// A. Thin Buildings (Bar Chart)
+// A. Revenue Bar Chart
 const RevenueBarChart = ({ data }) => {
   if (!data || data.length === 0)
     return (
@@ -148,7 +114,6 @@ const RevenueBarChart = ({ data }) => {
     <div className="w-full h-48 mt-4 flex items-end justify-between gap-1 sm:gap-2 px-2 pb-2">
       {data.map((d, i) => {
         const heightPercent = Math.max((d.value / maxVal) * 100, 2);
-
         return (
           <div
             key={i}
@@ -177,7 +142,7 @@ const RevenueBarChart = ({ data }) => {
   );
 };
 
-// B. Pie Chart
+// B. Order Pie Chart
 const OrderPieChart = ({ stats }) => {
   const total =
     stats.completed + stats.pending + stats.cancelled + stats.progress;
@@ -348,7 +313,7 @@ const DashboardCard = ({
 const Pagination = ({ currentPage, totalPages, onPageChange }) => {
   if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-auto">
+    <div className="flex items-center justify-between pt-4 border-t border-slate-100 mt-auto bg-white p-4">
       <span className="text-[10px] font-bold text-slate-400 uppercase">
         Page {currentPage} of {totalPages}
       </span>
@@ -356,14 +321,14 @@ const Pagination = ({ currentPage, totalPages, onPageChange }) => {
         <button
           onClick={() => onPageChange(Math.max(1, currentPage - 1))}
           disabled={currentPage === 1}
-          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30"
         >
           <ChevronLeft size={14} />
         </button>
         <button
           onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
           disabled={currentPage === totalPages}
-          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30"
         >
           <ChevronRight size={14} />
         </button>
@@ -373,7 +338,7 @@ const Pagination = ({ currentPage, totalPages, onPageChange }) => {
 };
 
 // 1. ADD EXPENSE FORM
-const AddExpenseForm = ({ onClose }) => {
+const AddExpenseForm = ({ onClose, currentUser }) => {
   const [formData, setFormData] = useState({
     amount: "",
     category: "Expenses",
@@ -389,6 +354,7 @@ const AddExpenseForm = ({ onClose }) => {
         amount: parseFloat(formData.amount),
         category: formData.category,
         description: formData.description,
+        addedBy: currentUser?.displayName || currentUser?.email || "Admin",
         createdAt: serverTimestamp(),
       });
       onClose();
@@ -423,7 +389,7 @@ const AddExpenseForm = ({ onClose }) => {
               onChange={(e) =>
                 setFormData({ ...formData, amount: e.target.value })
               }
-              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold focus:border-rose-500 outline-none"
+              className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold outline-none"
               placeholder="0.00"
             />
           </div>
@@ -460,7 +426,7 @@ const AddExpenseForm = ({ onClose }) => {
         </div>
         <button
           disabled={loading}
-          className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-lg transition-all flex items-center justify-center gap-2"
+          className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-lg flex items-center justify-center gap-2"
         >
           {loading ? (
             <Loader2 className="animate-spin" size={14} />
@@ -474,28 +440,18 @@ const AddExpenseForm = ({ onClose }) => {
 };
 
 // 2. EXPENSES LIST MODAL
-const ExpensesListModal = ({ isOpen, onClose, expenses }) => {
+const ExpensesListModal = ({ isOpen, onClose, expenses, currentUser }) => {
   useScrollLock();
   const [showAddForm, setShowAddForm] = useState(false);
-
   if (!isOpen) return null;
-
   const displayItems = expenses.slice(0, 5);
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+      <div
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
         onClick={onClose}
       />
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="relative bg-white w-full max-w-lg rounded-[2rem] shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden"
-      >
+      <div className="relative bg-white w-full max-w-lg rounded-[2rem] shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
           <div>
             <h3 className="text-lg font-bold text-slate-900">
@@ -520,12 +476,13 @@ const ExpensesListModal = ({ isOpen, onClose, expenses }) => {
             </button>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto custom-scrollbar p-5">
           {showAddForm && (
-            <AddExpenseForm onClose={() => setShowAddForm(false)} />
+            <AddExpenseForm
+              onClose={() => setShowAddForm(false)}
+              currentUser={currentUser}
+            />
           )}
-
           {displayItems.length === 0 ? (
             <div className="text-center text-slate-400 text-xs py-10">
               No expenses recorded.
@@ -535,7 +492,7 @@ const ExpensesListModal = ({ isOpen, onClose, expenses }) => {
               {displayItems.map((item, idx) => (
                 <div
                   key={idx}
-                  className="flex justify-between items-center p-3 rounded-xl border border-slate-100 bg-white hover:border-slate-200 transition-colors"
+                  className="flex justify-between items-center p-3 rounded-xl border border-slate-100 bg-white"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
@@ -546,7 +503,7 @@ const ExpensesListModal = ({ isOpen, onClose, expenses }) => {
                         {item.description}
                       </p>
                       <p className="text-[10px] text-slate-400 font-mono">
-                        {item.dateFormatted}
+                        {item.dateFormatted} • {item.addedBy || "Admin"}
                       </p>
                     </div>
                   </div>
@@ -554,13 +511,7 @@ const ExpensesListModal = ({ isOpen, onClose, expenses }) => {
                     <p className="text-sm font-black text-slate-900">
                       {formatPrice(item.amount)}
                     </p>
-                    <span
-                      className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${
-                        item.category === "Purchase Bill"
-                          ? "bg-indigo-50 text-indigo-600"
-                          : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
+                    <span className="text-[9px] font-bold uppercase bg-slate-100 px-1.5 py-0.5 rounded">
                       {item.category}
                     </span>
                   </div>
@@ -569,36 +520,26 @@ const ExpensesListModal = ({ isOpen, onClose, expenses }) => {
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };
 
-// 3. MEMBERS / PARTNERS MODAL
+// 3. MEMBERS LIST MODAL
 const MembersListModal = ({ isOpen, onClose, partners }) => {
   useScrollLock();
   if (!isOpen) return null;
-
-  // FIXED: Robust check using hasRole helper + sort + limit
   const displayItems = partners
     .filter((p) => hasRole(p, "partner") || hasRole(p, "member"))
     .sort((a, b) => b.createdAtDate - a.createdAtDate)
     .slice(0, 5);
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+      <div
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
         onClick={onClose}
       />
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="relative bg-white w-full max-w-lg rounded-[2rem] shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden"
-      >
+      <div className="relative bg-white w-full max-w-lg rounded-[2rem] shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
           <div>
             <h3 className="text-lg font-bold text-slate-900">New Partners</h3>
@@ -621,17 +562,16 @@ const MembersListModal = ({ isOpen, onClose, partners }) => {
               {displayItems.map((p) => (
                 <div
                   key={p.id}
-                  className="p-3 rounded-2xl border border-slate-100 bg-white hover:border-blue-100 flex items-center gap-3 group transition-all"
+                  className="p-3 rounded-2xl border border-slate-100 bg-white flex items-center gap-3"
                 >
-                  <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm group-hover:bg-blue-500 group-hover:text-white transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm">
                     {p.fullName ? p.fullName.charAt(0) : "U"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-start">
                       <h4 className="text-xs font-bold text-slate-900 truncate">
-                        {p.fullName || "Unknown User"}
+                        {p.fullName || "Unknown"}
                       </h4>
-                      {/* --- FIXED: SHOWING PLAN NAME INSTEAD OF ROLE --- */}
                       <span className="px-2 py-0.5 rounded bg-slate-100 text-[9px] font-bold text-slate-500 uppercase">
                         {p.plan || "Starter"}
                       </span>
@@ -640,11 +580,6 @@ const MembersListModal = ({ isOpen, onClose, partners }) => {
                       <span className="flex items-center gap-1 text-[10px] text-slate-400 truncate">
                         <Mail size={10} /> {p.email}
                       </span>
-                      {p.phone && (
-                        <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                          <Phone size={10} /> {p.phone}
-                        </span>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -652,56 +587,46 @@ const MembersListModal = ({ isOpen, onClose, partners }) => {
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };
 
-// 4. NET P&L DETAILS MODAL
+// 4. P&L MODAL
 const PnLDetailsModal = ({ isOpen, onClose, revenueData, expenseData }) => {
   useScrollLock();
   const [activeTab, setActiveTab] = useState("credit");
-
   if (!isOpen) return null;
-
   const fullList = activeTab === "credit" ? revenueData : expenseData;
   const displayItems = fullList.slice(0, 5);
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+      <div
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
         onClick={onClose}
       />
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="relative bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden"
-      >
+      <div className="relative bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl flex flex-col max-h-[85vh] z-10 overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
           <div className="flex gap-4">
             <button
               onClick={() => setActiveTab("credit")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold ${
                 activeTab === "credit"
                   ? "bg-white shadow-md text-emerald-600"
-                  : "text-slate-400 hover:bg-white/50"
+                  : "text-slate-400"
               }`}
             >
-              <ArrowDownRight size={14} /> Credit (Income)
+              Credit (Income)
             </button>
             <button
               onClick={() => setActiveTab("debit")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold ${
                 activeTab === "debit"
                   ? "bg-white shadow-md text-rose-600"
-                  : "text-slate-400 hover:bg-white/50"
+                  : "text-slate-400"
               }`}
             >
-              <ArrowUpRight size={14} /> Debit (Expense)
+              Debit (Expense)
             </button>
           </div>
           <button
@@ -713,95 +638,125 @@ const PnLDetailsModal = ({ isOpen, onClose, revenueData, expenseData }) => {
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar p-5">
           {displayItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-48 text-slate-300 text-xs font-bold">
+            <div className="text-center text-slate-400 text-xs py-10">
               No records found.
             </div>
           ) : (
-            <>
-              <p className="text-[10px] font-bold text-slate-400 uppercase mb-3 text-center">
-                Showing Last 5 Transactions
-              </p>
-              <div className="space-y-2">
-                {displayItems.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="flex justify-between items-center p-3 rounded-xl border border-slate-100 bg-white hover:border-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                          activeTab === "credit"
-                            ? "bg-emerald-50 text-emerald-600"
-                            : "bg-rose-50 text-rose-600"
-                        }`}
-                      >
-                        {activeTab === "credit" ? (
-                          <Wallet size={14} />
-                        ) : (
-                          <CreditCard size={14} />
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-800">
-                          {item.description ||
-                            item.serviceName ||
-                            "Transaction"}
-                        </p>
-                        <p className="text-[10px] text-slate-400 font-mono">
-                          {item.dateFormatted}{" "}
-                          {item.subText ? `• ${item.subText}` : ""}
-                        </p>
-                      </div>
+            <div className="space-y-2">
+              {displayItems.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="flex justify-between items-center p-3 rounded-xl border border-slate-100 bg-white"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        activeTab === "credit"
+                          ? "bg-emerald-50 text-emerald-600"
+                          : "bg-rose-50 text-rose-600"
+                      }`}
+                    >
+                      {activeTab === "credit" ? (
+                        <Wallet size={14} />
+                      ) : (
+                        <CreditCard size={14} />
+                      )}
                     </div>
-                    <div className="text-right">
-                      <p
-                        className={`text-sm font-black ${
-                          activeTab === "credit"
-                            ? "text-emerald-600"
-                            : "text-rose-600"
-                        }`}
-                      >
-                        {activeTab === "credit" ? "+" : "-"}
-                        {formatPrice(item.amount)}
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">
+                        {item.description}
                       </p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">
-                        {item.category || "Service"}
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        {item.dateFormatted}
                       </p>
                     </div>
                   </div>
-                ))}
-              </div>
-            </>
+                  <div className="text-right">
+                    <p
+                      className={`text-sm font-black ${
+                        activeTab === "credit"
+                          ? "text-emerald-600"
+                          : "text-rose-600"
+                      }`}
+                    >
+                      {activeTab === "credit" ? "+" : "-"}
+                      {formatPrice(item.amount)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };
 
-// 5. PAYMENT VERIFICATION MODAL
-const PaymentVerificationModal = ({ isOpen, onClose, order }) => {
+// 5. PAYMENT VERIFICATION MODAL (FIXED)
+const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
   useScrollLock();
   const [amount, setAmount] = useState(order?.paymentRequestAmount || "");
   const [loading, setLoading] = useState(false);
   if (!isOpen || !order) return null;
   const totalCost = parseFloat(order.pricing?.priceToAdmin || 0);
   const currentlyPaid = parseFloat(order.paidAmount || 0);
-
-  // --- FIX: DUE AMOUNT IS 0 IF CANCELLED ---
-  const s = (order.status || "").toLowerCase();
-  const isCancelled = s.includes("cancel") || s.includes("reject");
+  const isCancelled = (order.status || "").toLowerCase().includes("cancel");
   const remainingDue = isCancelled ? 0 : totalCost - currentlyPaid;
-
   const isProgress = order.status === "In_Progress";
+
   const handleVerifyPayment = async () => {
     setLoading(true);
-    const newPaid = currentlyPaid + parseFloat(amount || 0);
+    const payAmount = parseFloat(amount || 0);
+    const newPaid = currentlyPaid + payAmount;
+
+    // --- KEY FIX: Fetch the actual profile name from DB ---
+    let verifierName = currentUser?.displayName;
+    if (!verifierName && currentUser?.uid) {
+      try {
+        const userDoc = await getDoc(
+          doc(db, "users", currentUser.uid, "profile", "account_info")
+        );
+        if (userDoc.exists()) {
+          verifierName = userDoc.data().fullName;
+        }
+      } catch (e) {
+        try {
+          // Fallback for artifacts path
+          const artDoc = await getDoc(
+            doc(
+              db,
+              "artifacts",
+              "default-app",
+              "users",
+              currentUser.uid,
+              "profile",
+              "account_info"
+            )
+          );
+          if (artDoc.exists()) verifierName = artDoc.data().fullName;
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+    verifierName = verifierName || currentUser?.email || "Admin";
+
     try {
+      const transaction = {
+        type: "CREDIT_VERIFICATION",
+        amount: payAmount,
+        date: new Date().toISOString(),
+        orderId: order.id,
+        verifiedBy: verifierName, // Saving correctly
+      };
       await updateDoc(doc(db, "orders", order.id), {
         paidAmount: newPaid,
         paymentStatus: newPaid >= totalCost ? "Paid" : "Partial",
         paymentRequestAmount: 0,
+        paymentHistory: order.paymentHistory
+          ? arrayUnion(transaction)
+          : [transaction],
       });
       onClose();
     } catch (e) {
@@ -810,10 +765,38 @@ const PaymentVerificationModal = ({ isOpen, onClose, order }) => {
       setLoading(false);
     }
   };
+
   const handleStatus = async (newStatus) => {
     setLoading(true);
     try {
-      await updateDoc(doc(db, "orders", order.id), { status: newStatus });
+      const updateData = { status: newStatus };
+      let actorName = currentUser?.displayName;
+      // Fetch name logic same as above for consistency
+      if (!actorName && currentUser?.uid) {
+        const uD = await getDoc(
+          doc(db, "users", currentUser.uid, "profile", "account_info")
+        );
+        if (uD.exists()) actorName = uD.data().fullName;
+      }
+      actorName = actorName || "Staff";
+
+      if (newStatus === "In_Progress") {
+        updateData.assignedTo = {
+          name: actorName,
+          uid: currentUser?.uid,
+          startedAt: new Date().toISOString(),
+        };
+      } else if (newStatus === "Completed") {
+        updateData.completedAt = new Date().toISOString();
+        if (!order.assignedTo) {
+          updateData.assignedTo = {
+            name: actorName,
+            uid: currentUser?.uid,
+            startedAt: new Date().toISOString(),
+          };
+        }
+      }
+      await updateDoc(doc(db, "orders", order.id), updateData);
       onClose();
     } catch (e) {
       console.error(e);
@@ -821,20 +804,14 @@ const PaymentVerificationModal = ({ isOpen, onClose, order }) => {
       setLoading(false);
     }
   };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+      <div
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
         onClick={onClose}
       />
-      <motion.div
-        initial={{ scale: 0.95, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="relative bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden z-10"
-      >
+      <div className="relative bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden z-10">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <div>
             <h2 className="text-base font-bold text-slate-900">Manage Order</h2>
@@ -864,22 +841,17 @@ const PaymentVerificationModal = ({ isOpen, onClose, order }) => {
               </span>
             </div>
             <div className="flex gap-2">
-              <div className="relative flex-1">
-                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-bold">
-                  ₹
-                </span>
-                <input
-                  type="number"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full pl-5 pr-2 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:outline-none focus:border-blue-500"
-                />
-              </div>
+              <input
+                type="number"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full pl-3 pr-2 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none"
+              />
               <button
                 onClick={handleVerifyPayment}
                 disabled={loading || !amount}
-                className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-lg text-[10px] font-bold shadow-md transition-all flex items-center gap-1 disabled:opacity-50"
+                className="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-lg text-[10px] font-bold shadow-md flex items-center gap-1"
               >
                 {loading ? (
                   <Loader2 size={12} className="animate-spin" />
@@ -890,38 +862,33 @@ const PaymentVerificationModal = ({ isOpen, onClose, order }) => {
               </button>
             </div>
           </div>
-          <div>
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-              <Zap size={12} className="text-amber-500" /> Actions
-            </h3>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => handleStatus("In_Progress")}
-                className="py-2.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 font-bold text-[10px] hover:bg-blue-100 transition-all"
-              >
-                In Progress
-              </button>
-              <button
-                onClick={() => handleStatus("Completed")}
-                disabled={!isProgress}
-                className={`py-2.5 rounded-lg border font-bold text-[10px] transition-all flex items-center justify-center gap-1 ${
-                  isProgress
-                    ? "border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    : "border-slate-100 bg-slate-50 text-slate-400 cursor-not-allowed"
-                }`}
-              >
-                {!isProgress && <ShieldCheck size={10} />} Completed
-              </button>
-              <button
-                onClick={() => handleStatus("Rejected")}
-                className="col-span-2 py-2.5 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 font-bold text-[10px] hover:bg-rose-100 transition-all"
-              >
-                Reject Order
-              </button>
-            </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => handleStatus("In_Progress")}
+              className="py-2.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-700 font-bold text-[10px]"
+            >
+              In Progress
+            </button>
+            <button
+              onClick={() => handleStatus("Completed")}
+              disabled={!isProgress}
+              className={`py-2.5 rounded-lg border font-bold text-[10px] ${
+                isProgress
+                  ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                  : "border-slate-100 bg-slate-50 text-slate-400"
+              }`}
+            >
+              Completed
+            </button>
+            <button
+              onClick={() => handleStatus("Rejected")}
+              className="col-span-2 py-2.5 rounded-lg border border-rose-100 bg-rose-50 text-rose-700 font-bold text-[10px]"
+            >
+              Reject Order
+            </button>
           </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 };
@@ -931,14 +898,16 @@ const AdminDashboard = () => {
   const [orders, setOrders] = useState([]);
   const [partners, setPartners] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [coupons, setCoupons] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
 
-  // Filters & Pagination
+  // Filters & UI State
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [chartFilter, setChartFilter] = useState("Weekly");
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const itemsPerPage = 10; // Strictly 10
 
   // Modal States
   const [actionOrder, setActionOrder] = useState(null);
@@ -960,41 +929,53 @@ const AdminDashboard = () => {
     return () => clearInterval(t);
   }, []);
 
-  // Fetch Data
+  // --- AUTH CHECK ---
+  useEffect(() => {
+    const auth = getAuth();
+    const unsub = auth.onAuthStateChanged((user) => {
+      if (user) setCurrentUser(user);
+    });
+    return () => unsub();
+  }, []);
+
+  // --- DATA FETCHING ---
   useEffect(() => {
     const unsubOrders = onSnapshot(
       query(collection(db, "orders"), orderBy("createdAt", "desc")),
       (snap) => {
-        const list = snap.docs.map((doc) => {
-          const d = doc.data();
-          const dateObj = d.createdAt?.toDate
-            ? d.createdAt.toDate()
-            : new Date();
-
-          // --- FIX: DUE AMOUNT IS 0 IF CANCELLED ---
-          const s = (d.status || "").toLowerCase();
-          const isCancelled = s.includes("cancel") || s.includes("reject");
-
-          return {
-            id: doc.id,
-            ...d,
-            adminPrice: parseFloat(d.pricing?.priceToAdmin || 0),
-            paidAmount: parseFloat(d.paidAmount || 0),
-            dueAmount: isCancelled
-              ? 0
-              : Math.max(
-                  0,
-                  parseFloat(d.pricing?.priceToAdmin || 0) -
-                    parseFloat(d.paidAmount || 0)
-                ),
-            createdAtDate: dateObj,
-            dateFormatted: dateObj.toLocaleDateString("en-IN", {
-              day: "numeric",
-              month: "short",
-            }),
-          };
-        });
-        setOrders(list);
+        setOrders(
+          snap.docs.map((doc) => {
+            const d = doc.data();
+            const dateObj = d.createdAt?.toDate
+              ? d.createdAt.toDate()
+              : new Date();
+            const isCancelled =
+              (d.status || "").toLowerCase().includes("cancel") ||
+              (d.status || "").toLowerCase().includes("reject");
+            return {
+              id: doc.id,
+              ...d,
+              adminPrice: parseFloat(d.pricing?.priceToAdmin || 0),
+              paidAmount: parseFloat(d.paidAmount || 0),
+              dueAmount: isCancelled
+                ? 0
+                : Math.max(
+                    0,
+                    parseFloat(d.pricing?.priceToAdmin || 0) -
+                      parseFloat(d.paidAmount || 0)
+                  ),
+              createdAtDate: dateObj,
+              dateFormatted: dateObj.toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+              }),
+              timeFormatted: dateObj.toLocaleTimeString("en-IN", {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            };
+          })
+        );
       }
     );
 
@@ -1019,15 +1000,29 @@ const AdminDashboard = () => {
     const unsubExpenses = onSnapshot(
       query(collection(db, "expenses"), orderBy("createdAt", "desc")),
       (snap) => {
-        const list = snap.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-          createdAtDate: doc.data().createdAt?.toDate() || new Date(),
-          dateFormatted: (
-            doc.data().createdAt?.toDate() || new Date()
-          ).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
-        }));
-        setExpenses(list);
+        setExpenses(
+          snap.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAtDate: doc.data().createdAt?.toDate() || new Date(),
+            dateFormatted: (
+              doc.data().createdAt?.toDate() || new Date()
+            ).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+          }))
+        );
+      }
+    );
+
+    const unsubCoupons = onSnapshot(
+      query(collection(db, "coupons"), orderBy("createdAt", "desc")),
+      (snap) => {
+        setCoupons(
+          snap.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAtDate: doc.data().createdAt?.toDate() || new Date(),
+          }))
+        );
       }
     );
 
@@ -1035,6 +1030,7 @@ const AdminDashboard = () => {
       unsubOrders();
       unsubPartners();
       unsubExpenses();
+      unsubCoupons();
     };
   }, []);
 
@@ -1042,50 +1038,48 @@ const AdminDashboard = () => {
     if (orders.length || partners.length) setLoading(false);
   }, [orders, partners]);
 
-  // STATS CALCULATION
+  // --- REFERRAL MAP ---
+  const referralMap = useMemo(() => {
+    const map = {};
+    partners.forEach((p) => {
+      if (p.referralCode) map[p.referralCode.toUpperCase()] = p.fullName;
+    });
+    return map;
+  }, [partners]);
+
+  // --- STATS CALCULATION ---
   const stats = useMemo(() => {
     const start = new Date(dateRange.start);
     const end = new Date(dateRange.end);
     end.setHours(23, 59, 59);
-
     const isInRange = (date) => date >= start && date <= end;
 
-    const filteredOrders = orders.filter((o) => isInRange(o.createdAtDate));
-    const filteredExpenses = expenses.filter((e) => isInRange(e.createdAtDate));
-    const filteredPartners = partners.filter((p) => isInRange(p.createdAtDate));
+    const fOrders = orders.filter((o) => isInRange(o.createdAtDate));
+    const fExpenses = expenses.filter((e) => isInRange(e.createdAtDate));
+    const fPartners = partners.filter((p) => isInRange(p.createdAtDate));
 
-    // Revenue
-    const serviceRevenue = filteredOrders.reduce(
-      (sum, o) => sum + o.paidAmount,
-      0
-    );
-    const partnershipRevenue = filteredPartners.reduce(
-      (sum, p) => sum + (PLAN_PRICES[(p.plan || "").toLowerCase()] || 0),
-      0
-    );
-    const totalDue = filteredOrders.reduce((sum, o) => sum + o.dueAmount, 0);
-    const totalRevenue = serviceRevenue + partnershipRevenue;
-    const totalExpenses = filteredExpenses.reduce(
-      (sum, e) => sum + (e.amount || 0),
-      0
-    );
+    const totalRevenue =
+      fOrders.reduce((s, o) => s + o.paidAmount, 0) +
+      fPartners.reduce(
+        (s, p) => s + (PLAN_PRICES[(p.plan || "").toLowerCase()] || 0),
+        0
+      );
+    const totalExpenses = fExpenses.reduce((s, e) => s + (e.amount || 0), 0);
     const netProfit = totalRevenue - totalExpenses;
 
-    // Orders Count
     let completed = 0,
       pending = 0,
       progress = 0,
       cancelled = 0;
-    filteredOrders.forEach((o) => {
+    fOrders.forEach((o) => {
       const s = (o.status || "").toLowerCase();
-      if (s.includes("complet") || s.includes("deliver")) completed++;
+      if (s.includes("complet")) completed++;
       else if (s.includes("progress")) progress++;
-      else if (s.includes("reject") || s.includes("cancel")) cancelled++;
+      else if (s.includes("cancel")) cancelled++;
       else pending++;
     });
 
-    // Partners
-    const partnerUsers = filteredPartners.filter(
+    const partnerUsers = fPartners.filter(
       (p) => hasRole(p, "partner") || hasRole(p, "member")
     );
     let starter = 0,
@@ -1094,22 +1088,25 @@ const AdminDashboard = () => {
     partnerUsers.forEach((p) => {
       const pl = (p.plan || "").toLowerCase();
       if (pl.includes("starter")) starter++;
-      else if (pl.includes("booster") || pl.includes("elite")) booster++;
-      else if (pl.includes("academic") || pl.includes("master")) academic++;
+      else if (pl.includes("booster")) booster++;
+      else if (pl.includes("academic")) academic++;
       else starter++;
     });
 
     return {
       revenue: {
         total: totalRevenue,
-        partnership: partnershipRevenue,
-        service: serviceRevenue,
-        due: totalDue,
+        due: fOrders.reduce((s, o) => s + o.dueAmount, 0),
+        service: fOrders.reduce((s, o) => s + o.paidAmount, 0),
+        partnership: fPartners.reduce(
+          (s, p) => s + (PLAN_PRICES[(p.plan || "").toLowerCase()] || 0),
+          0
+        ),
       },
       expenses: { total: totalExpenses },
       pnl: { value: netProfit, isLoss: netProfit < 0 },
       orders: {
-        total: filteredOrders.length,
+        total: fOrders.length,
         completed,
         pending,
         progress,
@@ -1119,7 +1116,187 @@ const AdminDashboard = () => {
     };
   }, [orders, partners, expenses, dateRange]);
 
-  // Data for Modals
+  // --- LIVE ACTIVITY FEED GENERATION ---
+  const liveFeed = useMemo(() => {
+    const feed = [];
+
+    // 1. Orders Related Events
+    orders.forEach((o) => {
+      // A. New Order
+      feed.push({
+        id: `ord-new-${o.id}`,
+        type: "ORDER_NEW",
+        timestamp: o.createdAtDate,
+        data: o,
+        activity: "New Order Received",
+        details: `${o.service?.name || "Service"}`,
+        subDetails: `${o.displayId} • ${o.partnerName}`,
+        financial: formatPrice(o.adminPrice),
+        financialType: "neutral",
+        actor: o.partnerName || "Partner",
+        icon: ShoppingBag,
+        colorClass: "bg-blue-50 text-blue-600 border-blue-100",
+      });
+
+      // B. Work Started (In Progress)
+      if (o.assignedTo?.startedAt) {
+        const startDate = o.assignedTo.startedAt.toDate
+          ? o.assignedTo.startedAt.toDate()
+          : new Date(o.assignedTo.startedAt);
+        feed.push({
+          id: `ord-start-${o.id}`,
+          type: "WORK_STARTED",
+          timestamp: startDate,
+          data: o,
+          activity: "Service In Progress",
+          details: o.service?.name,
+          subDetails: o.displayId,
+          financial: "Active",
+          financialType: "info",
+          actor: o.assignedTo.name || "Staff",
+          icon: PlayCircle,
+          colorClass: "bg-amber-50 text-amber-600 border-amber-100",
+        });
+      }
+
+      // C. Work Completed
+      if (o.completedAt) {
+        const compDate = o.completedAt.toDate
+          ? o.completedAt.toDate()
+          : new Date(o.completedAt);
+        feed.push({
+          id: `ord-comp-${o.id}`,
+          type: "ORDER_COMPLETED",
+          timestamp: compDate,
+          data: o,
+          activity: "Work Completed",
+          details: o.service?.name,
+          subDetails: o.displayId,
+          financial: "Done",
+          financialType: "success",
+          actor: o.assignedTo?.name || "Staff",
+          icon: CheckCircle,
+          colorClass: "bg-emerald-50 text-emerald-600 border-emerald-100",
+        });
+      }
+
+      // D. Payment Verified
+      if (o.paymentHistory && Array.isArray(o.paymentHistory)) {
+        o.paymentHistory.forEach((ph, idx) => {
+          const phDate = ph.date.toDate ? ph.date.toDate() : new Date(ph.date);
+          feed.push({
+            id: `pay-${o.id}-${idx}`,
+            type: "PAYMENT_VERIFIED",
+            timestamp: phDate,
+            data: o,
+            activity: "Payment Verified",
+            details: `Credit Added`,
+            subDetails: o.displayId,
+            financial: `+ ${formatPrice(Number(ph.amount))}`, // Correctly format Number
+            financialType: "success",
+            actor: ph.verifiedBy || "Admin", // Show who verified
+            icon: Check,
+            colorClass: "bg-emerald-50 text-emerald-600 border-emerald-100",
+          });
+        });
+      }
+    });
+
+    // 2. Partners & Staff
+    partners.forEach((p) => {
+      const roles = Array.isArray(p.role)
+        ? p.role
+        : (p.role || "").split(",").map((r) => r.trim());
+      const isStaff = roles.some((r) =>
+        ["Manager", "Sales", "Designer", "Editor", "Staff"].includes(r)
+      );
+
+      if (isStaff) {
+        feed.push({
+          id: `stf-${p.id}`,
+          type: "STAFF_JOINED",
+          timestamp: p.createdAtDate,
+          data: p,
+          activity: "New Staff Added",
+          details: p.fullName,
+          subDetails: `Role: ${roles.join(", ")}`,
+          financial: "N/A",
+          financialType: "neutral",
+          actor: "Admin",
+          icon: ShieldCheck,
+          colorClass: "bg-slate-900 text-white border-slate-700",
+        });
+      } else {
+        // Find who referred this partner
+        const referrer = p.appliedReferralCode
+          ? referralMap[p.appliedReferralCode]
+          : null;
+        feed.push({
+          id: `ptn-${p.id}`,
+          type: "PARTNER_JOINED",
+          timestamp: p.createdAtDate,
+          data: p,
+          activity: "New Partner Joined",
+          details: p.fullName,
+          subDetails: p.plan || "Starter",
+          financial: PLAN_PRICES[(p.plan || "").toLowerCase()]
+            ? `+ ${formatPrice(PLAN_PRICES[(p.plan || "").toLowerCase()])}`
+            : "Free",
+          financialType: "neutral",
+          actor: referrer ? `Ref: ${referrer}` : "Direct / Admin", // Who referred them
+          icon: UserPlus,
+          colorClass: "bg-indigo-50 text-indigo-600 border-indigo-100",
+        });
+      }
+    });
+
+    // 3. Coupons
+    coupons.forEach((c) => {
+      feed.push({
+        id: `cpn-${c.id}`,
+        type: "COUPON_CREATED",
+        timestamp: c.createdAtDate,
+        data: c,
+        activity: "Coupon Created",
+        details: c.code,
+        subDetails: `${c.discountPercent}% Off`,
+        financial: "Promo",
+        financialType: "purple",
+        actor: c.creatorName || "Admin",
+        icon: Ticket,
+        colorClass: "bg-purple-50 text-purple-600 border-purple-100",
+      });
+    });
+
+    // 4. Expenses
+    expenses.forEach((e) => {
+      feed.push({
+        id: `exp-${e.id}`,
+        type: "EXPENSE_ADDED",
+        timestamp: e.createdAtDate,
+        data: e,
+        activity: "Expense Recorded",
+        details: e.description,
+        subDetails: e.category,
+        financial: `- ${formatPrice(e.amount)}`,
+        financialType: "danger",
+        actor: e.addedBy || "Admin",
+        icon: CreditCard,
+        colorClass: "bg-rose-50 text-rose-600 border-rose-100",
+      });
+    });
+
+    // SORT BY TIMESTAMP DESCENDING
+    return feed.sort((a, b) => b.timestamp - a.timestamp);
+  }, [orders, partners, expenses, coupons, referralMap]);
+
+  // Pagination for Feed
+  const totalPages = Math.ceil(liveFeed.length / itemsPerPage);
+  const currentFeed = liveFeed.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const pnlModalData = useMemo(() => {
     const credit = orders
       .filter((o) => o.paidAmount > 0)
@@ -1143,7 +1320,6 @@ const AdminDashboard = () => {
     return { credit, debit };
   }, [orders, expenses]);
 
-  // Chart Data (Bar Chart)
   const { chartData, pieData } = useMemo(() => {
     const now = new Date();
     let revenuePoints = [];
@@ -1151,22 +1327,17 @@ const AdminDashboard = () => {
       pend = 0,
       canc = 0,
       prog = 0;
-
     const filteredForCharts = orders.filter((o) => {
-      const diffDays = Math.floor(
-        (now - o.createdAtDate) / (1000 * 60 * 60 * 24)
-      );
-      return chartFilter === "Weekly" ? diffDays <= 7 : diffDays <= 30;
+      const diff = Math.floor((now - o.createdAtDate) / (1000 * 60 * 60 * 24));
+      return chartFilter === "Weekly" ? diff <= 7 : diff <= 30;
     });
-
     filteredForCharts.forEach((o) => {
       const s = o.status?.toLowerCase() || "";
       if (s.includes("completed")) comp++;
       else if (s.includes("progress")) prog++;
-      else if (s.includes("reject") || s.includes("cancel")) canc++;
+      else if (s.includes("reject")) canc++;
       else pend++;
     });
-
     if (chartFilter === "Weekly") {
       const daysMap = {};
       for (let i = 6; i >= 0; i--) {
@@ -1209,39 +1380,14 @@ const AdminDashboard = () => {
     };
   }, [orders, chartFilter]);
 
-  // Filtered & Paginated Orders
-  const filteredOrders = useMemo(() => {
-    return orders.filter((item) => {
-      const term = searchTerm.toLowerCase();
-      const statusMatch =
-        statusFilter === "All" ||
-        (item.status || "").toLowerCase().includes(statusFilter.toLowerCase());
-      const searchMatch =
-        item.partnerName?.toLowerCase().includes(term) ||
-        item.displayId?.toLowerCase().includes(term) ||
-        item.service?.name?.toLowerCase().includes(term);
-      return statusMatch && searchMatch;
-    });
-  }, [orders, searchTerm, statusFilter]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
-  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
-  const currentOrders = filteredOrders.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
   return (
     <div className="min-h-screen bg-[#f8fafc] font-sans pb-12 overflow-x-hidden text-slate-900">
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         <div className="absolute -top-[10%] -right-[10%] w-[800px] h-[800px] bg-blue-100/40 rounded-full blur-[120px]" />
         <div className="absolute top-[20%] -left-[10%] w-[600px] h-[600px] bg-indigo-100/30 rounded-full blur-[100px]" />
       </div>
-
       <div className="relative z-10 max-w-[1600px] mx-auto px-4 sm:px-6 md:px-8 pt-6">
-        {/* HEADER */}
+        {/* HEADER & FILTERS */}
         <div className="flex flex-col lg:flex-row justify-between items-end gap-6 mb-8">
           <div>
             <div className="flex items-center gap-2 mb-1.5">
@@ -1260,7 +1406,6 @@ const AdminDashboard = () => {
               Overview
             </h1>
           </div>
-
           <div className="flex items-center bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
             <div className="px-3 flex items-center gap-2 text-slate-400">
               <Calendar size={16} />
@@ -1316,7 +1461,6 @@ const AdminDashboard = () => {
               </span>
             </div>
           </DashboardCard>
-
           <DashboardCard
             title="Total Expenses"
             mainValue={formatPrice(stats.expenses.total)}
@@ -1332,7 +1476,6 @@ const AdminDashboard = () => {
               Bills & Expenses
             </p>
           </DashboardCard>
-
           <DashboardCard
             title="Net P&L"
             mainValue={
@@ -1363,7 +1506,6 @@ const AdminDashboard = () => {
               </span>
             </div>
           </DashboardCard>
-
           <DashboardCard
             title="Service Orders"
             mainValue={stats.orders.total}
@@ -1389,7 +1531,6 @@ const AdminDashboard = () => {
               </div>
             </div>
           </DashboardCard>
-
           <DashboardCard
             title="New Partners"
             mainValue={stats.partners.total}
@@ -1401,50 +1542,14 @@ const AdminDashboard = () => {
             <div className="space-y-1 pt-1">
               <div className="flex justify-between items-center">
                 <span className="text-slate-500">Starter</span>
-                <div className="h-1.5 flex-1 mx-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-400"
-                    style={{
-                      width: `${
-                        (stats.partners.starter /
-                          Math.max(stats.partners.total, 1)) *
-                        100
-                      }%`,
-                    }}
-                  />
-                </div>
                 <b className="text-slate-700">{stats.partners.starter}</b>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-500">Booster</span>
-                <div className="h-1.5 flex-1 mx-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-purple-400"
-                    style={{
-                      width: `${
-                        (stats.partners.booster /
-                          Math.max(stats.partners.total, 1)) *
-                        100
-                      }%`,
-                    }}
-                  />
-                </div>
                 <b className="text-slate-700">{stats.partners.booster}</b>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-500">Academic</span>
-                <div className="h-1.5 flex-1 mx-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-orange-400"
-                    style={{
-                      width: `${
-                        (stats.partners.academic /
-                          Math.max(stats.partners.total, 1)) *
-                        100
-                      }%`,
-                    }}
-                  />
-                </div>
                 <b className="text-slate-700">{stats.partners.academic}</b>
               </div>
             </div>
@@ -1482,7 +1587,6 @@ const AdminDashboard = () => {
             </div>
             <RevenueBarChart data={chartData} />
           </div>
-
           <div className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-xl shadow-slate-200/40 relative overflow-hidden flex flex-col justify-center">
             <div className="flex justify-between items-center mb-6">
               <div>
@@ -1498,155 +1602,196 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* MAIN ORDERS TABLE */}
-        <div className="bg-white rounded-[2.5rem] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden flex flex-col min-h-[500px]">
+        {/* --- LIVE DASHBOARD SECTION --- */}
+        <div className="bg-white rounded-[2.5rem] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden flex flex-col min-h-[600px]">
           <div className="p-6 border-b border-slate-100 bg-white/80 backdrop-blur-md sticky top-0 z-20 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <Briefcase size={20} className="text-slate-400" /> Recent Orders
-              <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full text-[10px] ml-1">
-                (Total: {filteredOrders.length})
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <Activity
+                  size={20}
+                  className="text-emerald-500 animate-pulse"
+                />{" "}
+                Live Dashboard
+              </h3>
+              <p className="text-xs text-slate-400 font-medium mt-0.5 flex items-center gap-1">
+                Real-time stream of all platform activities
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-3 py-1 rounded-full uppercase tracking-wider">
+                {liveFeed.length} Events
               </span>
-            </h3>
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              {/* Status Filter Dropdown */}
-              <div className="relative">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="appearance-none pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold focus:outline-none focus:border-blue-500 transition-all cursor-pointer"
-                >
-                  <option value="All">All Status</option>
-                  <option value="Completed">Completed</option>
-                  <option value="In_Progress">In Progress</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Rejected">Rejected</option>
-                </select>
-                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-              </div>
-
-              {/* Search Bar */}
-              <div className="relative w-full sm:w-64 group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                <input
-                  type="text"
-                  placeholder="Search orders..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold focus:outline-none focus:border-blue-500 transition-all"
-                />
-              </div>
             </div>
           </div>
 
-          <div className="flex-1 overflow-x-auto">
+          <div className="flex-1 overflow-x-auto bg-slate-50/50">
             {loading ? (
               <div className="flex items-center justify-center h-64 text-slate-400 text-sm font-bold">
-                <Loader2 className="animate-spin mr-2" /> Loading...
+                <Loader2 className="animate-spin mr-2" /> Syncing...
               </div>
-            ) : currentOrders.length === 0 ? (
+            ) : liveFeed.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-64 opacity-50">
                 <p className="text-sm font-bold text-slate-400">
-                  No orders found.
+                  No recent activity.
                 </p>
               </div>
             ) : (
-              <table className="w-full text-left border-collapse min-w-[800px]">
-                <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-100">
-                  <tr>
-                    <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
-                      Service
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
-                      Partner
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
-                      Financials
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
-                      Status
-                    </th>
-                    <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest text-right">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {currentOrders.map((order) => {
-                    const statusConfig = getStatusConfig(order.status);
-                    return (
-                      <tr
-                        key={order.id}
-                        className="hover:bg-slate-50/60 transition-colors"
+              <div className="min-w-[800px]">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-white border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
+                        Activity
+                      </th>
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
+                        Details
+                      </th>
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
+                        Financials
+                      </th>
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest text-right">
+                        Time & Status
+                      </th>
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest text-right">
+                        Performed By
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {currentFeed.map((item, idx) => (
+                      <motion.tr
+                        key={item.id}
+                        initial={{ opacity: 0, y: 5 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ delay: idx * 0.03 }}
+                        className="hover:bg-slate-50 transition-colors group"
                       >
-                        <td className="px-6 py-4">
+                        {/* Activity Type */}
+                        <td className="px-6 py-4 align-top">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shadow-sm">
-                              {order.service?.name?.charAt(0) || "S"}
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center border shadow-sm ${item.colorClass}`}
+                            >
+                              <item.icon size={16} />
                             </div>
-                            <div>
-                              <div className="font-bold text-slate-900 text-xs">
-                                {order.service?.name}
-                              </div>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                {order.displayId}
-                              </div>
-                            </div>
+                            <span className="text-xs font-bold text-slate-700">
+                              {item.activity}
+                            </span>
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="font-bold text-slate-800 text-xs">
-                            {order.partnerName}
-                          </div>
-                          <div className="text-[10px] text-slate-400">
-                            {order.dateFormatted}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col gap-1">
-                            <div className="flex justify-between w-24 text-[10px]">
-                              <span className="text-slate-400">Cost:</span>
-                              <span className="font-bold text-slate-900">
-                                {formatPrice(order.adminPrice)}
+
+                        {/* Details */}
+                        <td className="px-6 py-4 align-top">
+                          {item.type.includes("ORDER") ||
+                          item.type === "WORK_STARTED" ||
+                          item.type === "PAYMENT_VERIFIED" ||
+                          item.type === "ORDER_COMPLETED" ? (
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-slate-900">
+                                {item.details}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-400">
+                                {item.subDetails}
                               </span>
                             </div>
-                            <div className="flex justify-between w-24 text-[10px]">
-                              <span className="text-slate-400">Due:</span>
+                          ) : (
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-slate-900">
+                                {item.details}
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {item.subDetails}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Financials */}
+                        <td className="px-6 py-4 align-top">
+                          {item.type.includes("ORDER") ||
+                          item.type === "WORK_STARTED" ||
+                          item.type === "ORDER_COMPLETED" ? (
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex justify-between w-24 text-[10px]">
+                                <span className="text-slate-400">Total:</span>{" "}
+                                <span className="font-bold">
+                                  {formatPrice(item.data.adminPrice)}
+                                </span>
+                              </div>
+                              <div className="flex justify-between w-24 text-[10px]">
+                                <span className="text-slate-400">Due:</span>{" "}
+                                <span
+                                  className={`font-bold ${
+                                    item.data.dueAmount > 0
+                                      ? "text-rose-600"
+                                      : "text-emerald-600"
+                                  }`}
+                                >
+                                  {formatPrice(item.data.dueAmount)}
+                                </span>
+                              </div>
+                            </div>
+                          ) : item.type === "PAYMENT_VERIFIED" ? (
+                            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">
+                               {item.financial}
+                            </span>
+                          ) : item.type === "PARTNER_JOINED" ? (
+                            <span className="text-xs font-bold text-slate-600">
+                              {item.financial}
+                            </span>
+                          ) : item.type === "COUPON_CREATED" ? (
+                            <span className="text-xs font-bold text-purple-600">
+                              {item.data.discountPercent}% Off
+                            </span>
+                          ) : (
+                            <span className="text-xs font-bold text-rose-600">
+                              {item.financial}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Time & Status */}
+                        <td className="px-6 py-4 align-top text-right">
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="text-[10px] font-bold text-slate-400">
+                              {item.timestamp.toLocaleTimeString("en-IN", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            <span className="text-[9px] text-slate-300">
+                              {item.timestamp.toLocaleDateString("en-IN", {
+                                day: "numeric",
+                                month: "short",
+                              })}
+                            </span>
+                            {(item.type.includes("ORDER") ||
+                              item.type === "WORK_STARTED") && (
                               <span
-                                className={`font-bold px-1 rounded ${
-                                  order.dueAmount > 0
-                                    ? "bg-red-50 text-red-600"
-                                    : "bg-emerald-50 text-emerald-600"
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase mt-1 ${
+                                  item.data.status.includes("Complete")
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                    : "bg-slate-100 text-slate-500 border-slate-200"
                                 }`}
                               >
-                                {formatPrice(order.dueAmount)}
+                                {item.data.status}
                               </span>
-                            </div>
+                            )}
                           </div>
                         </td>
-                        <td className="px-6 py-4">
-                          <div
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold border ${statusConfig.bg} ${statusConfig.text} ${statusConfig.border}`}
-                          >
-                            {React.createElement(statusConfig.icon, {
-                              size: 10,
-                            })}{" "}
-                            {statusConfig.label}
-                          </div>
+
+                        {/* Who (Actor) */}
+                        <td className="px-6 py-4 align-top text-right">
+                          <span className="text-xs font-bold text-slate-700 bg-slate-50 px-3 py-1 rounded-lg border border-slate-200 shadow-sm inline-block">
+                            {item.actor}
+                          </span>
                         </td>
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => setActionOrder(order)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[10px] font-bold shadow-lg shadow-slate-900/10 hover:bg-slate-800 hover:-translate-y-0.5 transition-all"
-                          >
-                            Verify <ArrowRight size={10} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -1667,6 +1812,7 @@ const AdminDashboard = () => {
             isOpen={isExpensesViewModalOpen}
             onClose={() => setIsExpensesViewModalOpen(false)}
             expenses={expenses}
+            currentUser={currentUser}
           />
         )}
         {isPnLModalOpen && (
@@ -1689,6 +1835,7 @@ const AdminDashboard = () => {
             isOpen={!!actionOrder}
             onClose={() => setActionOrder(null)}
             order={actionOrder}
+            currentUser={currentUser}
           />
         )}
       </AnimatePresence>

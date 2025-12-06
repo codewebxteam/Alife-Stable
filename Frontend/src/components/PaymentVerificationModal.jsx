@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, DollarSign, Loader2, History } from "lucide-react";
+import { X, DollarSign, Loader2, History, ShieldCheck } from "lucide-react";
 import {
   doc,
   updateDoc,
   arrayUnion,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "../firebase"; // Ensure this path matches your project structure
+import { db } from "../firebase";
 
 // --- Utility: Format Price ---
 const formatPrice = (value) => {
@@ -31,6 +31,14 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // --- SECURITY: Determine Verifier Identity ---
+  // Updated to use 'fullName' based on your database structure
+  const verifierIdentity =
+    currentUser?.fullName ||
+    currentUser?.displayName ||
+    currentUser?.email ||
+    `Staff ID: ${currentUser?.staffId || currentUser?.uid?.slice(0, 6)}`;
+
   // Reset form when modal opens/closes
   useEffect(() => {
     if (isOpen) setAmount("");
@@ -47,7 +55,10 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
     e.preventDefault();
     const payAmount = parseFloat(amount);
 
-    // Validation
+    if (!currentUser) {
+      return alert("Security Error: No logged-in user found. Cannot verify.");
+    }
+
     if (!payAmount || payAmount <= 0) {
       return alert("Please enter a valid amount greater than 0.");
     }
@@ -58,7 +69,6 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
     setLoading(true);
     try {
       const newPaidTotal = paid + payAmount;
-      // Logic: If new total paid >= total cost, status is "Paid", else "Partial"
       const newStatus = newPaidTotal >= total ? "Paid" : "Partial";
 
       // The Transaction Record Object
@@ -66,15 +76,17 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
         type: "CREDIT_VERIFICATION",
         amount: payAmount,
         date: new Date().toISOString(),
-        verifiedBy: currentUser?.displayName || "Staff Member",
-        verifiedById: currentUser?.uid || "unknown",
+        // STRICTLY use the identity derived from the logged-in user
+        verifiedBy: verifierIdentity,
+        verifiedById: currentUser.uid,
+        verifiedByEmail: currentUser.email || "N/A",
+        staffId: currentUser.staffId || "N/A", // Added staffId for extra tracking
         previousPaid: paid,
         newPaid: newPaidTotal,
         orderId: order.id,
         partnerName: order.partnerName || "Unknown",
       };
 
-      // Update Firestore
       await updateDoc(doc(db, "orders", order.id), {
         paidAmount: newPaidTotal,
         paymentStatus: newStatus,
@@ -82,8 +94,8 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
         lastUpdated: serverTimestamp(),
       });
 
-      alert(`Success! Payment of ${formatPrice(payAmount)} verified.`);
-      onClose(); // Close modal on success
+      alert(`Success! Payment verified by ${verifierIdentity}.`);
+      onClose();
     } catch (err) {
       console.error("Payment Verification Error:", err);
       alert("Failed to verify payment. Please try again.");
@@ -96,7 +108,6 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -105,7 +116,6 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
             onClick={onClose}
           />
 
-          {/* Modal Content */}
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -115,7 +125,7 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
             {/* Header */}
             <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <DollarSign className="text-emerald-600" size={20} /> Verify
+                <ShieldCheck className="text-emerald-600" size={20} /> Verify
                 Payment
               </h3>
               <button
@@ -126,9 +136,8 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
               </button>
             </div>
 
-            {/* Form */}
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
-              {/* Financial Summary Card */}
+              {/* Financial Summary */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
                 <div className="flex justify-between text-xs text-slate-500 font-medium mb-1">
                   <span>Total Order Cost</span>
@@ -144,10 +153,31 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
                 </div>
               </div>
 
-              {/* Input Field */}
+              {/* READ ONLY Verifier Info */}
+              <div className="bg-emerald-50/50 border border-emerald-100 p-3 rounded-xl flex items-center gap-3">
+                <div className="bg-emerald-100 p-2 rounded-full">
+                  <History size={16} className="text-emerald-700" />
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase font-bold text-emerald-600 tracking-wider">
+                    Verifying As
+                  </p>
+                  <p className="text-xs font-bold text-slate-800">
+                    {verifierIdentity}
+                  </p>
+                  {/* Optional: Show Staff ID if available */}
+                  {currentUser?.staffId && (
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      ID: {currentUser.staffId}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Amount Input */}
               <div>
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider ml-1">
-                  Enter Amount (Partial Allowed)
+                  Enter Amount Received
                 </label>
                 <div className="relative mt-1.5">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
@@ -163,15 +193,8 @@ const PaymentVerificationModal = ({ isOpen, onClose, order, currentUser }) => {
                     required
                   />
                 </div>
-                <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-1">
-                  <History size={10} /> Recorded in audit log as:{" "}
-                  <span className="font-bold text-slate-600">
-                    {currentUser?.displayName || "Staff"}
-                  </span>
-                </p>
               </div>
 
-              {/* Action Button */}
               <button
                 disabled={loading}
                 className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold shadow-lg transition-all flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"

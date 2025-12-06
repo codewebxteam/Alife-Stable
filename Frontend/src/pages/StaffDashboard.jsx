@@ -77,7 +77,9 @@ import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import * as XLSX from "xlsx";
 
-// Import Payment Modal (Assumed to exist based on previous context)
+// --- IMPORT COMPONENTS ---
+// Make sure ManagerDashboard.jsx is in the same folder or update the path
+import ManagerDashboard from "./ManagerDashboard";
 import PaymentVerificationModal from "../components/PaymentVerificationModal";
 
 // ==========================================
@@ -1970,9 +1972,7 @@ const StaffDashboard = () => {
     );
   };
 
-  const renderManagerView = () => (
-    <div className="text-center p-10 text-slate-500">Manager View Loaded</div>
-  );
+  const renderManagerView = () => <ManagerDashboard />;
 
   if (loading)
     return (
