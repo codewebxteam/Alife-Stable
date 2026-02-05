@@ -28,6 +28,8 @@ import {
   Crown,
   ShieldCheck,
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { getAuth } from "firebase/auth";
 import {
@@ -221,7 +223,6 @@ const PackageCountCard = ({ title, count, type, onClick }) => (
 
 // --- 3. MODALS ---
 
-// Order Details
 const OrderDetailsModal = ({ isOpen, onClose, order }) => {
   const [copied, setCopied] = useState("");
   if (!order) return null;
@@ -468,7 +469,6 @@ const OrderDetailsModal = ({ isOpen, onClose, order }) => {
   );
 };
 
-// Payment Request Modal (Sends to DB)
 const PaymentUpdateModal = ({ isOpen, onClose, order }) => {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -485,7 +485,6 @@ const PaymentUpdateModal = ({ isOpen, onClose, order }) => {
 
     setLoading(true);
     try {
-      // WRITE TO FIRESTORE: This triggers the Admin Notification
       await updateDoc(doc(db, "orders", order.id), {
         paymentStatus: "Verification_Pending",
         paymentRequestAmount: parseFloat(amount),
@@ -637,7 +636,6 @@ const PaymentUpdateModal = ({ isOpen, onClose, order }) => {
   );
 };
 
-// Member Details
 const MemberDetailsModal = ({ isOpen, onClose, title, members }) => (
   <AnimatePresence>
     {isOpen && (
@@ -683,7 +681,7 @@ const MemberDetailsModal = ({ isOpen, onClose, title, members }) => (
                   {members.map((m, i) => {
                     const status = checkSubscriptionStatus(
                       m.createdAtDate,
-                      m.Duration
+                      m.Duration,
                     );
                     return (
                       <div
@@ -758,6 +756,10 @@ const DashboardHome = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   // Modals
   const [memberModal, setMemberModal] = useState({
     isOpen: false,
@@ -794,7 +796,7 @@ const DashboardHome = () => {
     if (!user) return;
     const q = query(
       collection(db, "orders"),
-      where("partnerId", "==", user.uid)
+      where("partnerId", "==", user.uid),
     );
     const unsub = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map((doc) => {
@@ -857,7 +859,7 @@ const DashboardHome = () => {
 
     orders.forEach((o) => {
       const val = parseFloat(
-        o.pricing?.priceFromClient || o.amount?.replace(/[^0-9.]/g, "") || 0
+        o.pricing?.priceFromClient || o.amount?.replace(/[^0-9.]/g, "") || 0,
       );
       const status = (o.status || "").toLowerCase();
 
@@ -908,7 +910,7 @@ const DashboardHome = () => {
     const serviceCounts = {};
     timeFiltered.forEach((o) => {
       const val = parseFloat(
-        o.pricing?.priceFromClient || o.amount?.replace(/[^0-9.]/g, "") || 0
+        o.pricing?.priceFromClient || o.amount?.replace(/[^0-9.]/g, "") || 0,
       );
       serviceCounts[o.service?.name || "Unknown"] =
         (serviceCounts[o.service?.name || "Unknown"] || 0) + 1;
@@ -919,7 +921,7 @@ const DashboardHome = () => {
         if (chartMap.has(label)) chartMap.set(label, chartMap.get(label) + val);
       } else {
         const diff = Math.floor(
-          (now - o.createdAtDate) / (1000 * 60 * 60 * 24)
+          (now - o.createdAtDate) / (1000 * 60 * 60 * 24),
         );
         let wLabel = "Wk 4";
         if (diff > 21) wLabel = "Wk 1";
@@ -971,6 +973,15 @@ const DashboardHome = () => {
       packageData: pkgLists,
     };
   }, [orders, reportType, searchTerm, statusFilter]);
+
+  // Logic for Pagination
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentTableOrders = filteredTableOrders.slice(
+    indexOfFirstItem,
+    indexOfLastItem,
+  );
+  const totalPages = Math.ceil(filteredTableOrders.length / itemsPerPage);
 
   const handleCreateOrder = async (payload) => {
     try {
@@ -1124,7 +1135,7 @@ const DashboardHome = () => {
 
         <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 mb-12 items-start">
           {/* LEFT COLUMN */}
-          <div className="lg:col-span-8 flex flex-col gap-5">
+          <div className="lg:col-span-8 flex flex-col gap-5 w-full">
             {/* 1. FINANCIAL BAR */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2rem] p-5 text-white shadow-lg relative overflow-hidden flex flex-col justify-between h-auto sm:h-40 gap-4 sm:gap-0">
@@ -1188,7 +1199,7 @@ const DashboardHome = () => {
             </div>
 
             {/* 2. ORDER TABLE */}
-            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-200/20 flex flex-col h-[500px] lg:h-[650px] overflow-hidden relative">
+            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-200/20 flex flex-col h-[650px] overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-slate-100 bg-white/80 backdrop-blur-md sticky top-0 z-20 flex flex-col sm:flex-row justify-between gap-4">
                 <div>
                   <h3 className="font-bold text-slate-900 text-lg flex items-center gap-2">
@@ -1206,14 +1217,20 @@ const DashboardHome = () => {
                       type="text"
                       placeholder="Search..."
                       value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setCurrentPage(1);
+                      }}
                       className="w-full sm:w-40 pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#f7650b] focus:bg-white transition-all"
                     />
                   </div>
                   <div className="relative">
                     <select
                       value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
+                      onChange={(e) => {
+                        setStatusFilter(e.target.value);
+                        setCurrentPage(1);
+                      }}
                       className="pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 focus:outline-none focus:border-[#f7650b] appearance-none cursor-pointer focus:bg-white transition-all"
                     >
                       <option value="All">All Status</option>
@@ -1226,23 +1243,22 @@ const DashboardHome = () => {
                   </div>
                 </div>
               </div>
-              <div
-                className="flex-1 overflow-y-auto custom-scrollbar bg-white"
-                data-lenis-prevent
-              >
-                <table className="w-full text-left border-collapse">
+
+              {/* FIXED SCROLL AREA FOR TABLE */}
+              <div className="flex-1 overflow-auto custom-scrollbar">
+                <table className="w-full text-left border-collapse min-w-[600px]">
                   <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm border-b border-slate-100">
                     <tr>
-                      <th className="px-4 sm:px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
                         Client
                       </th>
-                      <th className="px-4 sm:px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest hidden sm:table-cell">
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest hidden sm:table-cell">
                         Status
                       </th>
-                      <th className="px-4 sm:px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest hidden md:table-cell">
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest hidden md:table-cell">
                         Admin Payment
                       </th>
-                      <th className="px-4 sm:px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest text-right">
+                      <th className="px-6 py-4 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest text-right">
                         Actions
                       </th>
                     </tr>
@@ -1257,7 +1273,7 @@ const DashboardHome = () => {
                           Loading records...
                         </td>
                       </tr>
-                    ) : filteredTableOrders.length === 0 ? (
+                    ) : currentTableOrders.length === 0 ? (
                       <tr>
                         <td colSpan="4" className="text-center py-24">
                           <div className="flex flex-col items-center opacity-50">
@@ -1269,7 +1285,7 @@ const DashboardHome = () => {
                         </td>
                       </tr>
                     ) : (
-                      filteredTableOrders.map((order) => {
+                      currentTableOrders.map((order) => {
                         const statusConfig = getStatusConfig(order.status);
                         const StatusIcon = statusConfig.icon;
                         const isCompleted =
@@ -1283,7 +1299,7 @@ const DashboardHome = () => {
                             }
                             className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
                           >
-                            <td className="px-4 sm:px-6 py-3.5 align-top">
+                            <td className="px-6 py-3.5 align-top">
                               <div className="flex items-center gap-3">
                                 <img
                                   src={order.avatar}
@@ -1303,12 +1319,11 @@ const DashboardHome = () => {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 sm:px-6 py-3.5 align-top hidden sm:table-cell">
+                            <td className="px-6 py-3.5 align-top hidden sm:table-cell">
                               <div
                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] font-bold border ${statusConfig.bg} ${statusConfig.text} ${statusConfig.border}`}
                               >
-                                <StatusIcon size={12} />
-                                {statusConfig.label}
+                                <StatusIcon size={12} /> {statusConfig.label}
                               </div>
                               <div className="text-[10px] text-slate-400 mt-1.5 pl-2 font-medium flex items-center gap-1">
                                 {isCompleted ? (
@@ -1327,7 +1342,7 @@ const DashboardHome = () => {
                                 )}
                               </div>
                             </td>
-                            <td className="px-4 sm:px-6 py-3.5 align-top hidden md:table-cell">
+                            <td className="px-6 py-3.5 align-top hidden md:table-cell">
                               <div className="flex flex-col gap-1">
                                 <div className="flex justify-between w-28 text-[10px]">
                                   <span className="text-slate-500 font-bold">
@@ -1351,7 +1366,7 @@ const DashboardHome = () => {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 sm:px-6 py-3.5 align-top text-right">
+                            <td className="px-6 py-3.5 align-top text-right">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1376,14 +1391,37 @@ const DashboardHome = () => {
                   </tbody>
                 </table>
               </div>
+
+              {/* PAGINATION FOOTER */}
+              {totalPages > 1 && (
+                <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between bg-white shrink-0">
+                  <span className="text-xs font-bold text-slate-400">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage((prev) => prev - 1)}
+                      className="p-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-all"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage((prev) => prev + 1)}
+                      className="p-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-all"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           {/* RIGHT COLUMN */}
-          <div
-            className="lg:col-span-4 flex flex-col gap-5 h-auto lg:h-[850px] lg:overflow-y-auto lg:custom-scrollbar"
-            data-lenis-prevent
-          >
+          <div className="lg:col-span-4 flex flex-col gap-5 w-full lg:max-h-[850px] lg:overflow-y-auto lg:custom-scrollbar lg:pr-1">
+            {/* SALES ANALYSIS */}
             <div className="bg-white rounded-[2rem] p-5 border border-slate-100 shadow-xl shadow-slate-200/20 shrink-0">
               <div className="flex justify-between items-center mb-1">
                 <div>
@@ -1411,13 +1449,7 @@ const DashboardHome = () => {
                     >
                       <div className="flex items-center gap-2">
                         <span
-                          className={`w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold ${
-                            i === 0
-                              ? "bg-orange-100 text-[#f7650b]"
-                              : i === 1
-                              ? "bg-slate-100 text-slate-600"
-                              : "bg-slate-50 text-slate-400"
-                          }`}
+                          className={`w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold ${i === 0 ? "bg-orange-100 text-[#f7650b]" : i === 1 ? "bg-slate-100 text-slate-600" : "bg-slate-50 text-slate-400"}`}
                         >
                           {i + 1}
                         </span>
@@ -1433,6 +1465,8 @@ const DashboardHome = () => {
                 </div>
               </div>
             </div>
+
+            {/* PACKAGES */}
             <div className="bg-white rounded-[2rem] p-5 border border-slate-100 shadow-xl shadow-slate-200/20 shrink-0">
               <div className="flex items-center gap-3 mb-5">
                 <div className="p-2 bg-slate-900 text-white rounded-xl shadow-lg shadow-slate-900/20">

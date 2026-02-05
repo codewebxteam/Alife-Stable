@@ -33,6 +33,8 @@ import AdminData from "./pages/AdminData"; // NEW: Create this file
 import StaffLogin from "./pages/StaffLogin";
 import StaffDashboard from "./pages/StaffDashboard";
 
+
+
 const App = () => {
   return (
     <ReactLenis root>
@@ -89,6 +91,8 @@ const App = () => {
             }
           />
 
+          {/* --- NEW: PARTNER'S AUTO-GENERATED LANDING PAGE --- */}
+         
           {/* PARTNER DASHBOARD ROUTES */}
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardHome />} />
