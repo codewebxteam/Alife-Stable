@@ -15,10 +15,12 @@ import {
   MessageSquare,
   Check,
   Hash,
+  GraduationCap, // Academy icon
+  LayoutGrid, // Services icon
 } from "lucide-react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import Logo from "./Logo";
-import { getAuth, signOut } from "firebase/auth";
+import { getAuth, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -26,51 +28,58 @@ const DashboardNavbar = () => {
   const [scrolled, setScrolled] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [partnerId, setPartnerId] = useState("Loading..."); // [!code ++]
+  const [partnerId, setPartnerId] = useState("Loading...");
+  const [currentUser, setCurrentUser] = useState(null); // Debug: Auth user state
 
   const auth = getAuth();
   const navigate = useNavigate();
-  const user = auth.currentUser;
+  const location = useLocation();
 
-  // Mock User Data
-  const userData = {
-    name: user?.displayName || "Agency Partner",
-    email: user?.email || "partner@socialmitra.com",
-    plan: "Starter",
-    avatar: `https://ui-avatars.com/api/?name=${
-      user?.displayName || "Agency"
-    }&background=f7650b&color=fff`,
-  };
-
-  // Fetch Partner ID [!code ++]
+  // --- DEBUGGED AUTH & ID FETCHING ---
   useEffect(() => {
-    const fetchPartnerId = async () => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        setCurrentUser(user);
         try {
-          const docRef = doc(
-            db,
-            "artifacts",
-            "default-app",
-            "users",
-            user.uid,
-            "profile",
-            "account_info"
-          );
+          // Fixed path to match your Firestore structure
+          const docRef = doc(db, "users", user.uid, "profile", "account_info");
           const docSnap = await getDoc(docRef);
-          if (docSnap.exists() && docSnap.data().referralCode) {
+
+          if (docSnap.exists() && docSnap.data().agencySubdomain) {
+            setPartnerId(docSnap.data().agencySubdomain);
+          } else if (docSnap.exists() && docSnap.data().referralCode) {
             setPartnerId(docSnap.data().referralCode);
           } else {
             setPartnerId(user.uid.slice(0, 6).toUpperCase());
           }
         } catch (e) {
           console.error("Error fetching ID");
+          setPartnerId("Error");
         }
+      } else {
+        setPartnerId("Guest");
       }
-    };
-    fetchPartnerId();
-  }, [user]);
+    });
 
-  // --- MOCK NOTIFICATIONS DATA ---
+    const handleScroll = () => setScrolled(window.scrollY > 20);
+    window.addEventListener("scroll", handleScroll);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, [auth]);
+
+  // Dynamic User Data
+  const userData = {
+    name: currentUser?.displayName || "Agency Partner",
+    email: currentUser?.email || "partner@socialmitra.com",
+    plan: "Starter",
+    avatar: `https://ui-avatars.com/api/?name=${
+      currentUser?.displayName || "Agency"
+    }&background=f7650b&color=fff`,
+  };
+
   const [notifications, setNotifications] = useState([
     {
       id: 1,
@@ -92,24 +101,32 @@ const DashboardNavbar = () => {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
   const handleLogout = async () => {
     await signOut(auth);
     navigate("/");
   };
 
+  // Updated NavLinks - Adding Academy and Services Catalog
   const navLinks = [
     { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, end: true },
+
+    {
+      name: "Services Catlog",
+      path: "/dashboard/services",
+      icon: LayoutGrid,
+      end: true,
+    },
     {
       name: "Training",
       path: "/dashboard/training",
       icon: MonitorPlay,
       end: true,
+    },
+    {
+      name: "Academy",
+      path: "https://www.alifestableacademy.com/",
+      icon: GraduationCap,
+      external: true,
     },
     {
       name: "My Agency",
@@ -142,7 +159,6 @@ const DashboardNavbar = () => {
                 <span className="text-lg md:text-xl font-bold text-slate-900 leading-none tracking-tight">
                   ALIFE STABLE
                 </span>
-                {/* [!code ++] Partner ID Section matching Flowchart */}
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     ID: {partnerId}
@@ -157,44 +173,51 @@ const DashboardNavbar = () => {
           </div>
 
           {/* --- CENTER: DESKTOP NAVIGATION --- */}
-          <div className="hidden md:flex items-center bg-slate-50 p-1.5 rounded-full border border-slate-200/60 shadow-inner relative">
-            {navLinks.map((item) => (
-              <NavLink
-                key={item.name}
-                to={item.path}
-                end={item.end}
-                className={({ isActive }) =>
-                  `relative px-5 py-2 rounded-full text-sm font-medium transition-all duration-300 flex items-center gap-2 z-10
-                  ${
-                    isActive
-                      ? "text-[#f7650b]"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-200/50"
-                  }`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <item.icon
-                      className={`w-4 h-4 ${
-                        isActive ? "stroke-[2.5px]" : "stroke-2"
-                      }`}
-                    />
-                    <span>{item.name}</span>
-                    {isActive && (
-                      <motion.div
-                        layoutId="desktop-nav-pill"
-                        className="absolute inset-0 bg-white rounded-full shadow-sm border border-slate-200/50 -z-10"
-                        transition={{
-                          type: "spring",
-                          bounce: 0.2,
-                          duration: 0.6,
-                        }}
+          <div className="hidden lg:flex items-center bg-slate-50 p-1.5 rounded-full border border-slate-200/60 shadow-inner relative">
+            {navLinks.map((item) =>
+              item.external ? (
+                <a
+                  key={item.name}
+                  href={item.path}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative px-4 py-2 rounded-full text-[13px] font-medium transition-all duration-300 flex items-center gap-2 text-slate-500 hover:text-slate-900 hover:bg-slate-200/50"
+                >
+                  <item.icon className="w-4 h-4 stroke-2" />
+                  <span>{item.name}</span>
+                </a>
+              ) : (
+                <NavLink
+                  key={item.name}
+                  to={item.path}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    `relative px-4 py-2 rounded-full text-[13px] font-medium transition-all duration-300 flex items-center gap-2 z-10
+                    ${isActive ? "text-[#f7650b]" : "text-slate-500 hover:text-slate-900 hover:bg-slate-200/50"}`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.icon
+                        className={`w-4 h-4 ${isActive ? "stroke-[2.5px]" : "stroke-2"}`}
                       />
-                    )}
-                  </>
-                )}
-              </NavLink>
-            ))}
+                      <span>{item.name}</span>
+                      {isActive && (
+                        <motion.div
+                          layoutId="desktop-nav-pill"
+                          className="absolute inset-0 bg-white rounded-full shadow-sm border border-slate-200/50 -z-10"
+                          transition={{
+                            type: "spring",
+                            bounce: 0.2,
+                            duration: 0.6,
+                          }}
+                        />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ),
+            )}
           </div>
 
           {/* --- RIGHT: ACTIONS & PROFILE --- */}
@@ -214,14 +237,63 @@ const DashboardNavbar = () => {
                 )}
               </button>
 
-              {/* Notifications Dropdown (Same as before) */}
               <AnimatePresence>
                 {isNotifOpen && (
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setIsNotifOpen(false)}
-                  />
-                  // ... (Rest of notification logic same as previous)
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setIsNotifOpen(false)}
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 overflow-hidden"
+                    >
+                      <div className="p-4 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+                        <h3 className="font-bold text-slate-900">
+                          Notifications
+                        </h3>
+                        <span className="text-[10px] font-black bg-[#f7650b] text-white px-2 py-0.5 rounded-full">
+                          {unreadCount} New
+                        </span>
+                      </div>
+                      <div className="max-h-80 overflow-y-auto">
+                        {notifications.map((n) => (
+                          <div
+                            key={n.id}
+                            className="p-4 border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer group"
+                          >
+                            <div className="flex gap-3">
+                              <div
+                                className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${n.type === "admin" ? "bg-blue-50 text-blue-600" : "bg-green-50 text-green-600"}`}
+                              >
+                                {n.type === "admin" ? (
+                                  <MessageSquare size={14} />
+                                ) : (
+                                  <Check size={14} />
+                                )}
+                              </div>
+                              <div>
+                                <h4 className="text-xs font-bold text-slate-900 group-hover:text-[#f7650b]">
+                                  {n.title}
+                                </h4>
+                                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                                  {n.message}
+                                </p>
+                                <span className="text-[9px] text-slate-400 mt-1 block">
+                                  {n.time}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <button className="w-full p-3 text-center text-xs font-bold text-slate-400 hover:text-[#f7650b] hover:bg-slate-50 transition-all">
+                        View All Notifications
+                      </button>
+                    </motion.div>
+                  </>
                 )}
               </AnimatePresence>
             </div>
@@ -249,9 +321,7 @@ const DashboardNavbar = () => {
                   <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></div>
                 </div>
                 <ChevronDown
-                  className={`w-4 h-4 text-slate-400 transition-transform duration-300 hidden md:block ${
-                    isProfileOpen ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 text-slate-400 transition-transform duration-300 hidden md:block ${isProfileOpen ? "rotate-180" : ""}`}
                 />
               </button>
 

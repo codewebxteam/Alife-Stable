@@ -21,21 +21,57 @@ import DashboardAgency from "./pages/DashboardAgency";
 import Profile from "./pages/Profile";
 import UpgradePlan from "./pages/UpgradePlan";
 import UpdatePassword from "./pages/UpdatePassword";
+import ServicesCatalog from "./pages/ServicesCatalog";
 
 // Admin Dashboard
 import AdminLayout from "./pages/AdminLayout";
 import AdminDashboard from "./pages/AdminDashboard";
 import StaffPerformance from "./pages/StaffPerformance";
-import SalesOrders from "./pages/SalesOrders"; // NEW: Create this file
-import AdminData from "./pages/AdminData"; // NEW: Create this file
+import SalesOrders from "./pages/SalesOrders";
+import AdminData from "./pages/AdminData";
+import ServicesPage from "./pages/ServicesPage";
 
-// Staff Portal (NEW)
+// Staff Portal
 import StaffLogin from "./pages/StaffLogin";
 import StaffDashboard from "./pages/StaffDashboard";
 
+// --- FIXED IMPORT PATH ---
+import AgencyTemplate from "./pages/AgencyTemplate";
 
+// --- NEW: Sharing Functionality ---
+// Updated to use the new Database-backed viewer
+import SharedPortfolio from "./pages/SharedPortfolio";
 
 const App = () => {
+  // --- SUBDOMAIN DETECTION LOGIC (Internal) ---
+  const getDetectedSubdomain = () => {
+    const hostname = window.location.hostname;
+    const parts = hostname.split(".");
+
+    const isLocalhost = hostname.includes("localhost");
+
+    if (isLocalhost && parts.length > 1) {
+      return parts[0];
+    } else if (!isLocalhost && parts.length > 2) {
+      return parts[0];
+    }
+    return null;
+  };
+
+  const subdomain = getDetectedSubdomain();
+
+  // --- FIXED: Subdomain view wrapped in Router to prevent Link errors ---
+  if (subdomain && subdomain !== "www") {
+    return (
+      <ReactLenis root>
+        <Router>
+          <AgencyTemplate forcedSubdomain={subdomain} />
+        </Router>
+      </ReactLenis>
+    );
+  }
+
+  // Normal flow (Dashboard & Main Website)
   return (
     <ReactLenis root>
       <Router>
@@ -91,8 +127,13 @@ const App = () => {
             }
           />
 
-          {/* --- NEW: PARTNER'S AUTO-GENERATED LANDING PAGE --- */}
-         
+          {/* Path-based testing */}
+          <Route path="/agency/:subdomain" element={<AgencyTemplate />} />
+
+          {/* --- NEW: SHARE VIEW ROUTE --- */}
+          {/* Updated to use :id to match Firestore Document ID */}
+          <Route path="/view/:id" element={<SharedPortfolio />} />
+
           {/* PARTNER DASHBOARD ROUTES */}
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardHome />} />
@@ -101,15 +142,16 @@ const App = () => {
             <Route path="profile" element={<Profile />} />
             <Route path="plans" element={<UpgradePlan />} />
             <Route path="updatepassword" element={<UpdatePassword />} />
+            <Route path="services" element={<ServicesCatalog />} />
           </Route>
 
           {/* ADMIN DASHBOARD ROUTES */}
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
-            <Route path="orders" element={<SalesOrders />} />{" "}
-            {/* Maps to "Sales & Orders" */}
+            <Route path="orders" element={<SalesOrders />} />
             <Route path="staff" element={<StaffPerformance />} />
-            <Route path="data" element={<AdminData />} /> {/* Maps to "Data" */}
+            <Route path="data" element={<AdminData />} />
+            <Route path="services" element={<ServicesPage />} />
           </Route>
 
           {/* STAFF PORTAL ROUTES */}

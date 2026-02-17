@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Lock,
   Database,
+  Briefcase, // Naya icon add kiya gaya hai
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { getAuth, signOut } from "firebase/auth";
@@ -47,6 +48,12 @@ const AdminNavbar = () => {
       path: "/admin",
       icon: LayoutDashboard,
       end: true,
+    },
+    {
+      name: "Services", // Naya link yahan add hua hai
+      path: "/admin/services",
+      icon: Briefcase,
+      end: false,
     },
     {
       name: "Sales & Orders",
@@ -201,15 +208,15 @@ const AdminNavbar = () => {
       </motion.nav>
 
       {/* Bottom Tabs for Mobile */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)] px-6">
-        <div className="flex justify-around items-center h-16">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200 pb-[env(safe-area-inset-bottom)] px-2">
+        <div className="flex justify-between items-center h-16">
           {navLinks.map((item) => (
             <NavLink
               key={item.name}
               to={item.path}
               end={item.end}
               className={({ isActive }) =>
-                `flex flex-col items-center gap-1 transition-colors ${
+                `flex flex-col items-center gap-1 transition-colors min-w-[64px] ${
                   isActive ? "text-slate-900" : "text-slate-400"
                 }`
               }
@@ -217,10 +224,10 @@ const AdminNavbar = () => {
               {({ isActive }) => (
                 <>
                   <item.icon
-                    className={`w-6 h-6 ${isActive ? "fill-slate-900" : ""}`}
+                    className={`w-5 h-5 ${isActive ? "fill-slate-900" : ""}`}
                     strokeWidth={isActive ? 2.5 : 2}
                   />
-                  <span className="text-[10px] font-bold">
+                  <span className="text-[9px] font-bold">
                     {item.name.split(" ")[0]}
                   </span>
                 </>

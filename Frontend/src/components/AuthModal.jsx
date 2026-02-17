@@ -23,47 +23,12 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-// --- Firebase Imports ---
-import { initializeApp, getApps, getApp } from "firebase/app";
-import {
-  getAuth,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
-  signOut,
-  sendPasswordResetEmail,
-} from "firebase/auth";
+// --- FIREBASE IMPORTS ---
 import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
+import { updateProfile } from "firebase/auth";
 
-// ==========================================
-// FIREBASE CONFIGURATION
-// ==========================================
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
-
-// --- Initialize Firebase ---
-let app;
-let auth;
-let db;
-
-try {
-  if (getApps().length === 0) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApp();
-  }
-  auth = getAuth(app);
-  db = getFirestore(app);
-  auth.useDeviceLanguage();
-} catch (e) {
-  console.error("Firebase init error:", e);
-}
+// --- CONTEXT IMPORT ---
+import { useAuth } from "../context/AuthContext";
 
 // --- Mock Data ---
 const INDIAN_STATES = [
@@ -107,6 +72,8 @@ const PLANS = [
 
 const AuthModal = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
+  const { login, signup, resetPassword, currentUser, removeUser, db } =
+    useAuth();
 
   // Views: 'login', 'signup-step-1', 'signup-step-2', 'forgot-password'
   const [view, setView] = useState("login");
@@ -118,25 +85,18 @@ const AuthModal = ({ isOpen, onClose }) => {
   // --- Form States ---
   const [loginIdentifier, setLoginIdentifier] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [selectedState, setSelectedState] = useState("");
   const [city, setCity] = useState("");
   const [pincode, setPincode] = useState("");
-
-  // Forgot Password State
   const [resetEmail, setResetEmail] = useState("");
-
   const [selectedPlan, setSelectedPlan] = useState("");
-
-  // --- New States ---
   const [couponCode, setCouponCode] = useState("");
   const [referralCode, setReferralCode] = useState("");
   const [isCouponVerified, setIsCouponVerified] = useState(false);
   const [couponMessage, setCouponMessage] = useState("");
-
   const [signupPassword, setSignupPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [strength, setStrength] = useState(0);
@@ -183,8 +143,7 @@ const AuthModal = ({ isOpen, onClose }) => {
     setStrength(score);
   }, [signupPassword]);
 
-  const getAppId = () =>
-    typeof __app_id !== "undefined" ? __app_id : "default-app";
+  const getAppId = () => "default-app";
 
   const navigateTo = (newView) => {
     setDirection(1);
@@ -193,7 +152,6 @@ const AuthModal = ({ isOpen, onClose }) => {
     setSuccessMsg("");
   };
 
-  // --- Forgot Password Logic ---
   const handleForgotPassword = async (e) => {
     e.preventDefault();
     if (!resetEmail) {
@@ -203,34 +161,23 @@ const AuthModal = ({ isOpen, onClose }) => {
     setLoading(true);
     setError("");
     setSuccessMsg("");
-
     try {
-      await sendPasswordResetEmail(auth, resetEmail);
+      await resetPassword(resetEmail);
       setSuccessMsg("Reset link sent! Check your inbox.");
       setResetEmail("");
     } catch (err) {
-      console.error(err);
-      if (err.code === "auth/user-not-found") {
-        setError("No account found with this email.");
-      } else if (err.code === "auth/invalid-email") {
-        setError("Invalid email address.");
-      } else {
-        setError("Failed to send reset email. Try again.");
-      }
+      setError("Failed to send reset email. Try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  // --- Coupon Logic ---
   const handleVerifyCoupon = () => {
     setCouponMessage("");
     if (!couponCode) {
       setCouponMessage("Please enter a coupon code.");
       return;
     }
-
-    // Mock Validation
     if (couponCode.toUpperCase() === "LIFE999") {
       setIsCouponVerified(true);
       setCouponMessage("Coupon Applied Successfully! ✅");
@@ -240,7 +187,6 @@ const AuthModal = ({ isOpen, onClose }) => {
     }
   };
 
-  // --- Login Logic ---
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -250,14 +196,16 @@ const AuthModal = ({ isOpen, onClose }) => {
       let emailToLogin = loginIdentifier;
       const isPhone = /^\d+$/.test(loginIdentifier);
 
+      // 1. Handle Phone Login Lookup
       if (isPhone) {
+        console.log("DEBUG: Performing phone lookup...");
         const appId = getAppId();
         const lookupRef = doc(
           db,
           "artifacts",
           appId,
           "user_lookup",
-          loginIdentifier
+          loginIdentifier,
         );
         const lookupSnap = await getDoc(lookupRef);
 
@@ -268,15 +216,34 @@ const AuthModal = ({ isOpen, onClose }) => {
         }
       }
 
-      await signInWithEmailAndPassword(auth, emailToLogin, loginPassword);
-      onClose();
-      navigate("/dashboard");
+      // 2. Authenticate User
+      console.log("DEBUG: Authenticating user...");
+      const userCredential = await login(emailToLogin, loginPassword);
+      const user = userCredential.user;
+
+      // 3. Role-Based Access Check
+      // Fetch user role from the standard 'users' collection used in AuthContext
+      console.log("DEBUG: Checking user role for UID:", user.uid);
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+
+      onClose(); // Close modal after successful check
+
+      if (userSnap.exists() && userSnap.data().role === "admin") {
+        console.log("DEBUG: Admin detected. Redirecting to /admin...");
+        navigate("/admin");
+      } else {
+        console.log(
+          "DEBUG: Standard user detected. Redirecting to /dashboard...",
+        );
+        navigate("/dashboard");
+      }
     } catch (err) {
-      console.error(err);
+      console.error("DEBUG: Login Error:", err.message);
       setError(
         err.message === "Phone number not found. Please Sign Up."
           ? err.message
-          : "Invalid credentials."
+          : "Invalid credentials. Please check your email/password.",
       );
     } finally {
       setLoading(false);
@@ -292,11 +259,8 @@ const AuthModal = ({ isOpen, onClose }) => {
     navigateTo("signup-step-2");
   };
 
-  // --- MAIN SIGNUP LOGIC (With Duplicate Check & Rollback) ---
   const handleSignup = async (e) => {
     e.preventDefault();
-
-    // 1. STRICT VALIDATION
     if (!selectedPlan || !signupPassword) {
       setError("Please select a plan and password");
       return;
@@ -312,33 +276,41 @@ const AuthModal = ({ isOpen, onClose }) => {
 
     setLoading(true);
     setError("");
-
     let userCreated = null;
 
     try {
       const appId = getAppId();
-
-      // --- FIX: Check if Phone Number Already Exists ---
+      console.log("DEBUG: Checking phone existence...");
       const phoneLookupRef = doc(db, "artifacts", appId, "user_lookup", phone);
       const phoneLookupSnap = await getDoc(phoneLookupRef);
 
       if (phoneLookupSnap.exists()) {
         throw new Error("Phone number already registered. Please Login.");
       }
-      // --------------------------------------------------
 
-      // 2. Create Auth User
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        signupPassword
-      );
+      console.log("DEBUG: Creating Auth user...");
+      const userCredential = await signup(email, signupPassword);
       userCreated = userCredential.user;
 
-      // 3. Update Profile
       await updateProfile(userCreated, { displayName: fullName });
 
-      // 4. Save Data to Firestore
+      const userData = {
+        fullName: fullName || "",
+        email: email || "",
+        phone: phone || "",
+        state: selectedState || "",
+        city: city || "",
+        pincode: pincode || "",
+        plan: selectedPlan || "",
+        couponCode: couponCode ? couponCode.toUpperCase() : "",
+        referralCode: referralCode ? referralCode.toUpperCase() : "",
+        joinedAt: new Date().toISOString(),
+        role: "Partner",
+        paymentStatus: "completed",
+        paymentId: "N/A",
+      };
+
+      console.log("DEBUG: Saving to Firestore...");
       await setDoc(
         doc(
           db,
@@ -347,62 +319,33 @@ const AuthModal = ({ isOpen, onClose }) => {
           "users",
           userCreated.uid,
           "profile",
-          "account_info"
+          "account_info",
         ),
-        {
-          fullName,
-          email,
-          phone,
-          state: selectedState,
-          city,
-          pincode,
-          plan: selectedPlan,
-          couponCode: couponCode.toUpperCase(),
-          referralCode: referralCode.toUpperCase(),
-          joinedAt: new Date().toISOString(),
-          role: "Partner",
-          paymentStatus: "completed",
-          paymentId: "N/A",
-        }
+        userData,
       );
-
-      // 5. Phone Lookup (Save AFTER successful creation)
       await setDoc(doc(db, "artifacts", appId, "user_lookup", phone), {
         email: email,
       });
 
-      // 6. Success
+      console.log("DEBUG: Firestore successful.");
       setLoading(false);
       onClose();
       navigate("/dashboard");
     } catch (err) {
-      console.error("Signup Error:", err);
-      setLoading(false);
-
-      // --- ROLLBACK LOGIC ---
+      console.error("DEBUG: Signup Failed:", err);
       if (userCreated) {
-        try {
-          await userCreated.delete(); // Delete "Ghost" account
-          await signOut(auth);
-          console.log("Rollback: User deleted due to setup failure.");
-        } catch (deleteErr) {
-          console.error(
-            "Rollback failed (User might need to re-login to delete):",
-            deleteErr
-          );
-          await signOut(auth);
-        }
+        console.log("DEBUG: Rolling back Auth account...");
+        await removeUser();
       }
-
-      if (err.code === "auth/email-already-in-use") {
-        setError("Email is already registered. Try logging in.");
-      } else {
-        setError(err.message || "Registration failed. Please try again.");
-      }
+      setError(
+        err.code === "auth/email-already-in-use"
+          ? "Email already registered."
+          : err.message || "Registration failed.",
+      );
+      setLoading(false);
     }
   };
 
-  // ... UI Helpers ...
   const getStrengthColor = () => {
     if (strength === 0) return "bg-slate-200";
     if (strength <= 2) return "bg-red-500";
@@ -436,7 +379,6 @@ const AuthModal = ({ isOpen, onClose }) => {
             onClick={onClose}
             className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[60]"
           />
-
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -451,8 +393,6 @@ const AuthModal = ({ isOpen, onClose }) => {
               >
                 <X className="w-5 h-5" />
               </button>
-
-              {/* Header */}
               <div className="relative h-28 bg-slate-900 overflow-hidden shrink-0 flex items-center justify-center transition-all duration-300">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20" />
                 <motion.div
@@ -460,45 +400,39 @@ const AuthModal = ({ isOpen, onClose }) => {
                   transition={{ duration: 4, repeat: Infinity }}
                   className="absolute -bottom-10 -right-10 w-40 h-40 bg-[#f7650b] rounded-full blur-[60px]"
                 />
-
                 <div className="relative z-10 text-center px-4 mt-2">
                   <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mb-1">
                     {view === "forgot-password"
                       ? "Reset Password"
-                      : view.includes("login")
-                      ? "Welcome Back"
-                      : "Create Account"}
+                      : view === "login"
+                        ? "Welcome Back"
+                        : "Create Account"}
                   </h2>
                   <p className="text-slate-400 text-xs sm:text-sm font-medium">
-                    {view === "forgot-password" &&
-                      "We'll send you a reset link"}
-                    {view === "login" && "Login to your dashboard"}
-                    {view.includes("signup") && "Join our community today"}
+                    {view === "forgot-password"
+                      ? "We'll send you a reset link"
+                      : view === "login"
+                        ? "Login to your dashboard"
+                        : "Join our community today"}
                   </p>
                 </div>
               </div>
-
               <div className="flex-1 overflow-y-auto scrollbar-hide p-6 sm:p-8 relative bg-slate-50/50">
-                {/* Error Message */}
                 {error && (
                   <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-500 text-xs font-bold text-center flex items-center justify-center gap-2">
                     <AlertCircle className="w-4 h-4" /> {error}
                   </div>
                 )}
-
-                {/* Success Message (For Forgot Password) */}
                 {successMsg && (
                   <div className="mb-4 p-3 bg-green-50 border border-green-100 rounded-xl text-green-600 text-xs font-bold text-center flex items-center justify-center gap-2">
                     <CheckCircle2 className="w-4 h-4" /> {successMsg}
                   </div>
                 )}
-
                 <AnimatePresence
                   initial={false}
                   custom={direction}
                   mode="popLayout"
                 >
-                  {/* --- VIEW: LOGIN --- */}
                   {view === "login" && (
                     <motion.div
                       key="login"
@@ -552,9 +486,7 @@ const AuthModal = ({ isOpen, onClose }) => {
                             </button>
                           </div>
                         </div>
-
-                        {/* Forgot Password Link */}
-                        <div className="flex justify-end items-center pt-2">
+                        <div className="flex justify-end pt-2">
                           <button
                             type="button"
                             onClick={() => navigateTo("forgot-password")}
@@ -563,7 +495,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             Forgot Password?
                           </button>
                         </div>
-
                         <button
                           disabled={loading}
                           className="w-full py-4 rounded-xl bg-slate-900 text-white font-bold text-base shadow-lg hover:bg-[#f7650b] transition-all flex items-center justify-center gap-2 disabled:opacity-70"
@@ -589,11 +520,9 @@ const AuthModal = ({ isOpen, onClose }) => {
                       </div>
                     </motion.div>
                   )}
-
-                  {/* --- VIEW: FORGOT PASSWORD --- */}
                   {view === "forgot-password" && (
                     <motion.div
-                      key="forgot-password"
+                      key="forgot"
                       variants={slideVariants}
                       initial="enter"
                       animate="center"
@@ -623,7 +552,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             />
                           </div>
                         </div>
-
                         <button
                           disabled={loading}
                           className="w-full py-4 rounded-xl bg-[#f7650b] text-white font-bold text-base shadow-lg hover:bg-orange-600 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
@@ -636,7 +564,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                           <Send className="w-4 h-4" />
                         </button>
                       </form>
-
                       <div className="mt-6 text-center">
                         <button
                           onClick={() => navigateTo("login")}
@@ -647,11 +574,9 @@ const AuthModal = ({ isOpen, onClose }) => {
                       </div>
                     </motion.div>
                   )}
-
-                  {/* --- SIGNUP STEP 1 --- */}
                   {view === "signup-step-1" && (
                     <motion.div
-                      key="signup-step-1"
+                      key="s1"
                       variants={slideVariants}
                       initial="enter"
                       animate="center"
@@ -690,14 +615,12 @@ const AuthModal = ({ isOpen, onClose }) => {
                             value={phone}
                             onChange={(e) =>
                               setPhone(
-                                e.target.value.replace(/\D/g, "").slice(0, 10)
+                                e.target.value.replace(/\D/g, "").slice(0, 10),
                               )
                             }
                             className="w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border border-slate-200 focus:border-[#f7650b] transition-all text-sm font-medium outline-none"
                           />
                         </div>
-
-                        {/* Added State & City Row */}
                         <div className="grid grid-cols-2 gap-3">
                           <div className="relative">
                             <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -705,7 +628,7 @@ const AuthModal = ({ isOpen, onClose }) => {
                               required
                               value={selectedState}
                               onChange={(e) => setSelectedState(e.target.value)}
-                              className="w-full pl-10 pr-2 py-3.5 rounded-xl bg-white border border-slate-200 focus:border-[#f7650b] transition-all text-sm font-medium text-slate-600 outline-none appearance-none"
+                              className="w-full pl-10 pr-2 py-3.5 rounded-xl bg-white border border-slate-200 focus:border-[#f7650b] transition-all text-sm font-medium outline-none appearance-none"
                             >
                               <option value="" disabled>
                                 State
@@ -729,8 +652,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             />
                           </div>
                         </div>
-
-                        {/* Added Pincode */}
                         <div className="relative">
                           <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                           <input
@@ -745,7 +666,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             className="w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border border-slate-200 focus:border-[#f7650b] transition-all text-sm font-medium outline-none"
                           />
                         </div>
-
                         <button className="w-full mt-4 py-3.5 rounded-xl bg-slate-900 text-white font-bold text-base hover:bg-[#f7650b] transition-all flex items-center justify-center gap-2">
                           Next Page <ArrowRight className="w-4 h-4" />
                         </button>
@@ -760,11 +680,9 @@ const AuthModal = ({ isOpen, onClose }) => {
                       </div>
                     </motion.div>
                   )}
-
-                  {/* --- SIGNUP STEP 2 --- */}
                   {view === "signup-step-2" && (
                     <motion.div
-                      key="signup-step-2"
+                      key="s2"
                       variants={slideVariants}
                       initial="enter"
                       animate="center"
@@ -772,7 +690,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                       className="w-full"
                     >
                       <form onSubmit={handleSignup} className="space-y-4">
-                        {/* Plan */}
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                             Select Your Plan
@@ -783,7 +700,7 @@ const AuthModal = ({ isOpen, onClose }) => {
                               required
                               value={selectedPlan}
                               onChange={(e) => setSelectedPlan(e.target.value)}
-                              className="w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border border-slate-200 focus:border-[#f7650b] transition-all text-sm font-medium text-slate-600 outline-none appearance-none"
+                              className="w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border border-slate-200 focus:border-[#f7650b] transition-all text-sm font-medium outline-none appearance-none"
                             >
                               <option value="" disabled>
                                 Choose a plan...
@@ -796,8 +713,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             </select>
                           </div>
                         </div>
-
-                        {/* Referral Code */}
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                             Referral Code{" "}
@@ -817,8 +732,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             />
                           </div>
                         </div>
-
-                        {/* Coupon Code */}
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                             Coupon Code <span className="text-red-500">*</span>
@@ -829,46 +742,32 @@ const AuthModal = ({ isOpen, onClose }) => {
                               <input
                                 type="text"
                                 required
-                                placeholder="Enter Coupon (e.g. LIFE999)"
+                                placeholder="Enter Coupon"
                                 value={couponCode}
                                 onChange={(e) => {
                                   setCouponCode(e.target.value.toUpperCase());
                                   setIsCouponVerified(false);
                                   setCouponMessage("");
                                 }}
-                                className={`w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border transition-all text-sm font-medium outline-none ${
-                                  isCouponVerified
-                                    ? "border-green-500 focus:border-green-500"
-                                    : "border-slate-200 focus:border-[#f7650b]"
-                                }`}
+                                className={`w-full pl-10 pr-4 py-3.5 rounded-xl bg-white border transition-all text-sm font-medium outline-none ${isCouponVerified ? "border-green-500" : "border-slate-200 focus:border-[#f7650b]"}`}
                               />
                             </div>
                             <button
                               type="button"
                               onClick={handleVerifyCoupon}
-                              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
-                                isCouponVerified
-                                  ? "bg-green-50 text-green-600 border-green-200 cursor-default"
-                                  : "bg-slate-900 text-white hover:bg-slate-800 border-slate-900"
-                              }`}
+                              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${isCouponVerified ? "bg-green-50 text-green-600 border-green-200" : "bg-slate-900 text-white hover:bg-slate-800"}`}
                             >
                               {isCouponVerified ? "Applied" : "Verify"}
                             </button>
                           </div>
                           {couponMessage && (
                             <div
-                              className={`text-xs font-bold mt-1 ml-1 ${
-                                isCouponVerified
-                                  ? "text-green-600"
-                                  : "text-red-500"
-                              }`}
+                              className={`text-xs font-bold mt-1 ml-1 ${isCouponVerified ? "text-green-600" : "text-red-500"}`}
                             >
                               {couponMessage}
                             </div>
                           )}
                         </div>
-
-                        {/* Password */}
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-slate-500 uppercase ml-1">
                             Create Password
@@ -906,8 +805,8 @@ const AuthModal = ({ isOpen, onClose }) => {
                                     strength <= 2
                                       ? "text-red-500"
                                       : strength === 3
-                                      ? "text-orange-500"
-                                      : "text-green-500"
+                                        ? "text-orange-500"
+                                        : "text-green-500"
                                   }
                                 >
                                   {getStrengthLabel()}
@@ -926,7 +825,6 @@ const AuthModal = ({ isOpen, onClose }) => {
                             </div>
                           )}
                         </div>
-
                         <div className="pt-2 flex gap-3">
                           <button
                             type="button"
@@ -945,11 +843,9 @@ const AuthModal = ({ isOpen, onClose }) => {
                             {loading ? (
                               <Loader2 className="w-5 h-5 animate-spin" />
                             ) : (
-                              <>
-                                Complete Registration{" "}
-                                <ArrowRight className="w-5 h-5" />
-                              </>
-                            )}
+                              "Complete Registration"
+                            )}{" "}
+                            <ArrowRight className="w-5 h-5" />
                           </button>
                         </div>
                       </form>
